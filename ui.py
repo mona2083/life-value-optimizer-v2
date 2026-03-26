@@ -3,7 +3,7 @@ import pandas as pd
 
 from optimizer import run_optimizer
 from sensitivity import run_sensitivity, make_line_chart
-from llm import get_item_defaults, get_result_summary
+from llm import get_item_defaults, get_result_summary, get_user_profile_from_chat
 from lang import PRESETS
 from default_items import DEFAULT_ITEMS, CATEGORIES, CATEGORY_CONSTRAINTS
 from lifestyle import calculate_lifestyle_adjustments, INCOME_REASON_OPTIONS
@@ -217,21 +217,91 @@ def render_step2(T: dict, lang: str):
     target_monthly_savings = int(savings_goal / (savings_period_years * 12))
     st.caption(T["monthly_savings_cap"].format(target_monthly_savings))
 
+    st.divider()
+
+    # =====================================================================
+    # 【追加】AIライフスタイル・プロファイラー (Chat UI)
+    # =====================================================================
+    st.subheader("🤖 AI プロファイリング (Optional)")
+    st.caption("休日の理想的な過ごし方や、最近買って満足したものを教えてください。AIがあなたの価値観を推測し、設定を自動補完します。")
+    
+    chat_input_label = "例: 週末はカフェで読書したり、友人と美味しいご飯を食べるのが好きです。" if lang == "ja" else "e.g., I love reading at cafes and dining out with friends on weekends."
+    user_text = st.chat_input(chat_input_label)
+    
+    if user_text:
+        with st.chat_message("user"):
+            st.write(user_text)
+        with st.spinner("行動経済学の観点からあなたの価値観を分析中..."):
+            profile = get_user_profile_from_chat(user_text, lang)
+            
+            if profile and "weights" in profile:
+                # 1. スライダー用のセッションステートをAIの推論値で上書き
+                w = profile["weights"]
+                st.session_state["slider_health"] = w.get("health", 5)
+                st.session_state["slider_connections"] = w.get("connections", 5)
+                st.session_state["slider_freedom"] = w.get("freedom", 5)
+                st.session_state["slider_growth"] = w.get("growth", 5)
+                st.session_state["slider_savings"] = w.get("savings", 5)
+                
+                # 2. カスタムアイテムの自動追加（hobbyカテゴリに挿入）
+                c_item = profile.get("custom_item")
+                if c_item and "hobby" in st.session_state.category_dfs:
+                    cat_name = "hobby"
+                    new_idx = len(st.session_state.category_dfs[cat_name])
+                    new_row = pd.DataFrame([{
+                        "name": f"✨ {c_item.get('name', 'AI Custom Item')}",
+                        "initial_cost": c_item.get("initial_cost", 0),
+                        "monthly_cost": c_item.get("monthly_cost", 0),
+                        "health": c_item.get("health", 0),
+                        "connections": c_item.get("connections", 0),
+                        "freedom": c_item.get("freedom", 0),
+                        "growth": c_item.get("growth", 0),
+                        "priority": 1,
+                        "mandatory": False,
+                        "category": cat_name,
+                        "note": "AIがあなたの回答から推測・生成しました"
+                    }])
+                    # DataFrameの更新
+                    st.session_state.category_dfs[cat_name] = pd.concat(
+                        [st.session_state.category_dfs[cat_name], new_row], ignore_index=True
+                    )
+                    # UI状態の同期
+                    st.session_state[f"priority_{cat_name}_{new_idx}"] = 1
+                    st.session_state[f"mandatory_{cat_name}_{new_idx}"] = False
+                    st.session_state[f"initial_cost_{cat_name}_{new_idx}"] = c_item.get("initial_cost", 0)
+                    st.session_state[f"monthly_cost_{cat_name}_{new_idx}"] = c_item.get("monthly_cost", 0)
+                
+                st.success("✨ 分析完了！スライダーとあなた専用のアイテムが自動設定されました。（Step 3の「趣味・嗜好」タブを確認してください）")
+            else:
+                st.error("分析に失敗しました。もう少し長めの文章でもう一度お試しください。")
+
+    st.divider()
+
+    # =====================================================================
+    # 価値観の重み（スライダー）
+    # =====================================================================
     st.subheader(T["priority"])
     goal_preset = st.radio(T["goal_type"], T["goal_options"], horizontal=True)
     preset = PRESETS[lang][goal_preset]
 
+    # セッションステートに値がない場合はプリセットの初期値を入れる
+    for key, p_key in [("slider_health", "health"), ("slider_connections", "connections"), 
+                       ("slider_freedom", "freedom"), ("slider_growth", "growth"), 
+                       ("slider_savings", "savings")]:
+        if key not in st.session_state:
+            st.session_state[key] = preset[p_key]
+
     col8, col9, col10, col11, col12 = st.columns(5)
     with col8:
-        w_health = st.slider(T["w_health"], 1, 10, preset["health"])
+        w_health = st.slider(T["w_health"], 1, 10, key="slider_health")
     with col9:
-        w_connections = st.slider(T["w_connections"], 1, 10, preset["connections"])
+        w_connections = st.slider(T["w_connections"], 1, 10, key="slider_connections")
     with col10:
-        w_freedom = st.slider(T["w_freedom"], 1, 10, preset["freedom"])
+        w_freedom = st.slider(T["w_freedom"], 1, 10, key="slider_freedom")
     with col11:
-        w_growth = st.slider(T["w_growth"], 1, 10, preset["growth"])
+        w_growth = st.slider(T["w_growth"], 1, 10, key="slider_growth")
     with col12:
-        w_savings = st.slider(T["w_savings"], 1, 10, preset["savings"])
+        w_savings = st.slider(T["w_savings"], 1, 10, key="slider_savings")
 
     st.divider()
 
@@ -559,8 +629,23 @@ def render_risk_and_results(
                         weights=weights,
                         lang=lang,
                     )
-                if summary:
-                    st.info(f"{T['ai_summary_title']}\n\n{summary}")
+                # =====================================================================
+                # Render AI Life Coach Dashboard
+                # =====================================================================
+                if summary and isinstance(summary, dict):
+                    st.subheader("💡 AI Life Coach Dashboard")
+                    
+                    # 1. Concept (Theme)
+                    st.info(f"**Theme:** {summary.get('concept', '')}")
+                    
+                    # 2. Analysis
+                    st.write(f"**Analysis:** {summary.get('analysis', '')}")
+                    
+                    # 3. Blind Spot (Warning)
+                    st.warning(f"**Blind Spot:** {summary.get('blind_spot', '')}")
+                    
+                    # 4. Next Action (Success/Recommendation)
+                    st.success(f"**Next Action:** {summary.get('next_action', '')}")
                 else:
                     st.caption(T["ai_error_summary"])
 

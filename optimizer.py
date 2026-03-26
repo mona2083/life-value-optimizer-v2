@@ -88,9 +88,46 @@ def run_optimizer(
     savings_value = model.NewIntVar(0, int(monthly_budget * savings_coefficient) + 1, "savings_value")
     model.Add(savings_value == actual_savings_var * savings_coefficient)
 
-    model.Maximize(items_value + savings_value)
+    # =====================================================================
+    # Formulation of Diminishing Returns (Step-wise Penalty)
+    # =====================================================================
+    # Base penalty value. Scaled according to the overall utilities.
+    DIMINISHING_PENALTY_BASE = 500 
+
+    categories = set(item.get("category") for item in candidates)
+    category_penalties = []
+    
+    for cat in categories:
+        if cat in ("transport", "insurance"):
+            continue
+            
+        cat_indices = [i for i, item in enumerate(candidates) if item.get("category") == cat]
+        if len(cat_indices) <= 1:
+            continue
+            
+        cat_count_var = model.NewIntVar(0, len(cat_indices), f"count_{cat}")
+        model.Add(cat_count_var == sum(x[i] for i in cat_indices))
+        
+        diff_var = model.NewIntVar(-1, len(cat_indices), f"diff_{cat}")
+        model.Add(diff_var == cat_count_var - 1)
+        
+        over_count_var = model.NewIntVar(0, len(cat_indices), f"over_count_{cat}")
+        model.AddMaxEquality(over_count_var, [0, diff_var])
+        
+        cat_penalty = model.NewIntVar(0, 100000, f"penalty_{cat}")
+        model.Add(cat_penalty == over_count_var * DIMINISHING_PENALTY_BASE)
+        category_penalties.append(cat_penalty)
+    
+    total_penalty = model.NewIntVar(0, 1000000, "total_penalty")
+    model.Add(total_penalty == sum(category_penalties))
+    
+    # =====================================================================
+    # Update Objective Function: Maximize (Total Utility + Savings Value - Total Penalty)
+    # =====================================================================
+    model.Maximize(items_value + savings_value - total_penalty)
 
     solver = cp_model.CpSolver()
+    solver.parameters.random_seed = 42 
     status = solver.Solve(model)
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
