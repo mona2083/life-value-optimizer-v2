@@ -1,196 +1,276 @@
+import os
+import google.generativeai as genai
+from google.generativeai.types import RequestOptions
 import json
-import streamlit as st
-from google import genai
-from google.genai import types
 
-_client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+# APIキーの設定
+api_key = os.environ.get("GEMINI_API_KEY")
+if not api_key:
+    # 開発環境用のフォールバック（本番環境では必ず環境変数を使用）
+    try:
+        from keys import GEMINI_API_KEY
+        api_key = GEMINI_API_KEY
+    except ImportError:
+        print("Error: GEMINI_API_KEY not found. Please set the environment variable.")
 
-def get_item_defaults(item_name: str, lang: str) -> dict | None:
-    prompt = f"""
-You are a financial and lifestyle advisor.
-Return ONLY a JSON object. No explanation, no markdown, no backticks.
+genai.configure(api_key=api_key)
 
-Estimate realistic values for: "{item_name}"
+# モデルの初期化
+generation_config = {
+    "temperature": 0.3, # 心理判定としてブレを少なくするため低めに設定
+    "top_p": 0.95,
+    "top_k": 40,
+    "max_output_tokens": 1024,
+}
+
+_client = genai.GenerativeModel(
+    model_name="gemini-2.5-flash-lite", # 最新のliteモデル
+    generation_config=generation_config,
+)
+
+# =====================================================================
+# Functions
+# =====================================================================
+
+def _clamp_int_weight(x: float) -> int:
+    return max(1, min(10, int(round(x))))
+
+
+def _choice_letter(option_str: str) -> str | None:
+    s = (option_str or "").strip()
+    if len(s) >= 2 and s[0] in "ABCD" and s[1] == ":":
+        return s[0]
+    return None
+
+
+def infer_weights_from_survey(
+    lifestyle_data: dict,
+    financial_data: dict,
+    value_quiz: dict,
+    free_text: str = "",
+) -> dict:
+    """
+    LLM が使えないとき用のルールベース推定。
+    Step2/Step3の回答、貯蓄圧力、自由記述キーワードから重みを推定する。
+    """
+    h = c = f = g = s = 5.0
+
+    def bump(deltas: dict) -> None:
+        nonlocal h, c, f, g, s
+        h += deltas.get("health", 0)
+        c += deltas.get("connections", 0)
+        f += deltas.get("freedom", 0)
+        g += deltas.get("growth", 0)
+        s += deltas.get("savings", 0)
+
+    qt = _choice_letter(value_quiz.get("q_time", ""))
+    if qt == "A":
+        bump({"growth": 2.5, "freedom": 1.0})
+    elif qt == "B":
+        bump({"connections": 3.0})
+    elif qt == "C":
+        bump({"health": 3.0})
+    elif qt == "D":
+        bump({"savings": 3.0, "freedom": -0.5})
+
+    qr = _choice_letter(value_quiz.get("q_risk", ""))
+    if qr == "A":
+        bump({"growth": 2.0})
+    elif qr == "B":
+        bump({"freedom": 2.0, "connections": 0.5})
+    elif qr == "C":
+        bump({"health": 2.0})
+    elif qr == "D":
+        bump({"savings": 3.0})
+
+    ql = _choice_letter(value_quiz.get("q_live", ""))
+    if ql == "A":
+        bump({"freedom": 3.0})
+    elif ql == "B":
+        bump({"growth": 3.0})
+    elif ql == "C":
+        bump({"connections": 3.0})
+    elif ql == "D":
+        bump({"health": 3.0})
+
+    cq = _choice_letter(lifestyle_data.get("car_necessity", ""))
+    if cq == "A":
+        bump({"freedom": 2.0})
+    elif cq == "C":
+        bump({"freedom": -0.5, "savings": 1.0})
+
+    ws = _choice_letter(lifestyle_data.get("work_style", ""))
+    if ws == "A":
+        bump({"freedom": 1.5, "growth": 0.5})
+    elif ws == "C":
+        bump({"connections": 1.0})
+
+    di = _choice_letter(lifestyle_data.get("diet", ""))
+    if di == "A":
+        bump({"health": 2.0, "savings": 1.0})
+    elif di == "C":
+        bump({"connections": 1.0, "health": -0.5})
+
+    so = _choice_letter(lifestyle_data.get("social", ""))
+    if so == "A":
+        bump({"connections": 2.5})
+    elif so == "C":
+        bump({"connections": -1.0, "growth": 1.0})
+
+    le = _choice_letter(lifestyle_data.get("leisure", ""))
+    if le == "A":
+        bump({"growth": 1.0, "health": 0.5})
+    elif le == "B":
+        bump({"health": 2.0, "freedom": 1.0})
+    elif le == "C":
+        bump({"connections": 1.5, "growth": 0.5})
+
+    mb = max(float(financial_data.get("monthly_budget", 0) or 0), 1.0)
+    tms = float(financial_data.get("target_monthly_savings", 0) or 0)
+    ratio = tms / mb
+    if ratio >= 0.25:
+        bump({"savings": min(3.0, 1.5 + ratio * 3.0)})
+    elif ratio < 0.05:
+        bump({"savings": -1.0, "freedom": 0.5})
+
+    blob = free_text or ""
+    blob_l = blob.lower()
+    kw_rules = [
+        (("健康", "ジム", "フィットネス", "gym", "health", "fitness", "wellness"), {"health": 1.8}),
+        (("車", "運転", "car", "drive", "driving", "mobility"), {"freedom": 1.8}),
+        (("家族", "友人", "パートナー", "family", "friend", "social", "community"), {"connections": 1.5}),
+        (("貯金", "節約", "save", "saving", "invest"), {"savings": 1.5}),
+        (("学習", "勉強", "スキル", "learn", "course", "study", "資格"), {"growth": 1.5}),
+        (("自由", "独立", "freedom", "autonomy"), {"freedom": 1.2}),
+        (("推し", "趣味", "hobby", "passion"), {"growth": 0.8, "connections": 0.6}),
+    ]
+    for keys, delta in kw_rules:
+        if any(k in blob for k in keys) or any(
+            k.lower() in blob_l for k in keys if k.isascii() and len(k) > 2
+        ):
+            bump(delta)
+
+    return {
+        "health": _clamp_int_weight(h),
+        "connections": _clamp_int_weight(c),
+        "freedom": _clamp_int_weight(f),
+        "growth": _clamp_int_weight(g),
+        "savings": _clamp_int_weight(s),
+    }
+
+def get_user_profile(age: int, family: str, combined_data_str: str, lang: str) -> dict | None:
+    """
+    心理学・行動経済学に基づいた定型回答と自由記述を複合解析し、価値観スコア(1-10)を推論する
+    """
+    
+    # 熟練ライフプランナー兼心理学者としてのシステムプロンプト（JSON出力強制）
+    sys_prompt = f"""
+You are an expert Life Planner and Behavioral Psychologist with 30 years of experience.
+Your task is to analyze the provided user data to infer their core values for optimization weights.
+
+Determine a weight from 1 to 10 for each of the following five values:
+- 'health'
+- 'connections' (relationships, family, community)
+- 'freedom' (autonomy, leisure, mobility)
+- 'growth' (learning, skill-up, self-actualization)
+- 'savings' (security, future planning)
+
+【Analysis Logic】
+1. Start with a baseline (all 5) and use 'value_quiz' answers (based on established psychological trade-offs) as primary indicators.
+2. Analyze 'passion_free_text' for 'passion points'. If they mentioned specific passion (e.g., 'fandom', 'motorcycle', 'gym'), significantly increase the relevant value weight.
+3. Consider 'lifestyle_fact' (e.g., work style, diet) and 'financial_goal' as constraints and context.
+4. If there is a contradiction between their stated goal (e.g., 'savings' high) and their passion text (e.g., 'traveling a lot'), prioritize the passion text as the latent value, and slightly reduce the stated goal weight.
+
+Must return ONLY a valid JSON object. Do not include markdown or backticks.
+Language of the data is {lang}. Output must be {lang}.
+
+Example JSON Output:
 {{
-  "initial_cost":  <one-time USD cost, integer>,
-  "monthly_cost":  <monthly USD cost, integer>,
-  "health":        <physical & mental health impact, -10 to 10, integer>,
-  "connections":   <social connection & relationships score, -10 to 10, integer>,
-  "freedom":       <time freedom & autonomy score, -10 to 10, integer>,
-  "growth":        <personal growth & purpose score, -10 to 10, integer>
+  "health": 7,
+  "connections": 8,
+  "freedom": 10,
+  "growth": 5,
+  "savings": 4
 }}
 """
-    try:
-        response = _client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=prompt,
-            # 【追加】パラメータのブレをなくし、より厳密な出力を強制
-            config=types.GenerateContentConfig(temperature=0.1)
-        )
-        text  = response.text.strip()
-        start = text.find("{")
-        end   = text.rfind("}") + 1
-        
-        # 【追加】LLMが予期せぬテキスト（謝罪やエラー文）を返した際、アプリのクラッシュを防ぐ
-        if start == -1 or end <= start:
-            return None
-            
-        raw = json.loads(text[start:end])
 
-        def _coerce_int(v):
-            return int(float(v))
-
-        def _clamp(x, lo, hi):
-            return max(lo, min(hi, x))
-
-        for k in ("initial_cost", "monthly_cost"):
-            if k in raw:
-                try:
-                    raw[k] = _clamp(_coerce_int(raw[k]), 0, 10**12)
-                except Exception:
-                    raw.pop(k, None)
-
-        for k in ("health", "connections", "freedom", "growth"):
-            if k in raw:
-                try:
-                    raw[k] = _clamp(_coerce_int(raw[k]), -10, 10)
-                except Exception:
-                    raw.pop(k, None)
-
-        return raw
-    except Exception as e:
-        print(f"LLM parsing error: {e}")
-        return None
-
-def get_result_summary(
-    result: dict,
-    user_profile: dict,
-    weights: dict,
-    lang: str,
-) -> dict | None:
-    """
-    Generate a structured life coaching summary in JSON format.
-    """
-    selected_names = [item["name"] for item in result["selected"]]
-
-    if lang == "ja":
-        prompt = f"""
-                あなたは一流のライフコーチ兼行動経済学者です。
-                以下の最適化結果を分析し、JSONオブジェクトのみを返してください。
-                マークダウンやバッククォートは含めないでください。
-
-                ユーザー: {user_profile.get('age')}歳 / {user_profile.get('family')}
-                価値観の重み: 健康={weights['health']}, つながり={weights['connections']}, 自由={weights['freedom']}, 成長={weights['growth']}, 貯蓄={weights['savings']}
-                選ばれたアイテム: {', '.join(selected_names) or 'なし'}
-                月次費用合計: ${result['total_monthly_cost']}
-                実際の月次貯蓄: ${result['actual_monthly_savings']}
-                貯蓄目標達成率: {result['savings_rate']:.0%}
-
-                【必須のJSONフォーマット】※値はすべて日本語で記述してください
-                {{
-                "concept": "<このライフスタイル戦略を表す15文字以内のキャッチーなテーマ>",
-                "analysis": "<この選択がユーザーの価値観の重みとどう合致しているかの論理的な説明（2〜3文）>",
-                "blind_spot": "<この選択によって生じる心理的または生活上の死角・リスク（例：社会的な時間が不足している等）を1つ>",
-                "next_action": "<明日から始められる具体的で直ぐに実行可能なアクションを1つ>"
-                }}
-                """
-    else:
-        prompt = f"""
-                You are an expert life coach and behavioral economist.
-                Analyze the following optimization result and return ONLY a JSON object.
-                Do not include markdown formatting or backticks.
-
-                User: Age {user_profile.get('age')} / {user_profile.get('family')}
-                Value weights: Health={weights['health']}, Connections={weights['connections']}, Freedom={weights['freedom']}, Growth={weights['growth']}, Savings={weights['savings']}
-                Selected items: {', '.join(selected_names) or 'None'}
-                Total monthly cost: ${result['total_monthly_cost']}
-                Actual monthly savings: ${result['actual_monthly_savings']}
-                Savings goal rate: {result['savings_rate']:.0%}
-
-                Required JSON format:
-                {{
-                "concept": "<A catchy title for this lifestyle strategy in 4-5 words>",
-                "analysis": "<Logical explanation of why this selection aligns with their value weights in 2-3 sentences>",
-                "blind_spot": "<One psychological or lifestyle risk/blind spot caused by this selection (e.g., lack of social time)>",
-                "next_action": "<One specific, immediate action to take starting tomorrow>"
-                }}
-                """
-    try:
-        response = _client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=prompt,
-            config=types.GenerateContentConfig(temperature=0.1)
-        )
-        text  = response.text.strip()
-        start = text.find("{")
-        end   = text.rfind("}") + 1
-        
-        if start == -1 or end <= start:
-            return None
-            
-        raw = json.loads(text[start:end])
-        return raw
-    except Exception as e:
-        print(f"LLM summary error: {e}")
-        return None
-
-def get_user_profile_from_chat(chat_text: str, lang: str) -> dict | None:
-    """
-    ユーザーの自由記述チャットから、価値観の重み（1〜10）と
-    おすすめのカスタムアイテムを抽出する関数。
-    """
     prompt = f"""
-You are an expert behavioral economist and lifestyle profiler.
-Analyze the user's text about their lifestyle/recent purchases.
+Age: {age} / Family: {family}
+【User Combined Input Data (Raw dictionary format)】
+{combined_data_str}
+"""
 
-User Text: "{chat_text}"
+    try:
+        response = _client.generate_content(
+            contents=f"{sys_prompt}\n\n{prompt}"
+        )
+        text = response.text.strip()
+        
+        # JSON部分を抽出
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        
+        if start == -1 or end <= start:
+            return None
+            
+        return json.loads(text[start:end])
+    except Exception as e:
+        print(f"Gemini Profile Error: {e}")
+        return None
 
-Task 1: Score their core values from 1 to 10 based on their text.
-- health: Physical/mental wellness.
-- connections: Socializing, family, community.
-- freedom: Time flexibility, autonomy, travel.
-- growth: Learning, career, new experiences.
-- savings: Financial security, risk aversion.
+def get_result_summary(result: dict, user_profile: dict, weights: dict, lang: str) -> dict | None:
+    """
+    最適化結果に対するAIライフコーチからのフィードバックを生成する
+    """
+    
+    # ユーザーが見るアイテム名を言語に合わせて抽出
+    selected_names = []
+    for item in result["selected"]:
+        name = item["name_ja"] if lang == "ja" else item["name_en"]
+        selected_names.append(name)
 
-Task 2: Suggest exactly ONE custom lifestyle item they would love, which is NOT in a standard budget (e.g., "Monthly Spa", "Coffee Roasting Beans").
+    sys_prompt = f"""
+You are an expert Life Coach and Behavioral Economist.
+Analyze the optimization result for the user based on their value weights.
+Generate a summary dashboard with four sections:
+1. 'concept': A catchy title for this lifestyle strategy (in 15 chars or 4-5 words).
+2. 'analysis': A logical explanation of why this selection aligns well with their specified value weights (2-3 sentences).
+3. 'blind_spot': One psychological or lifestyle risk/blind spot caused by this selection (1 sentence).
+4. 'next_action': One specific, immediate action they should take starting tomorrow (1 sentence).
 
-Return ONLY a JSON object in the following format. Do not use markdown blocks, no backticks, no explanations.
+Must return ONLY a valid JSON object. Do not include markdown.
+Language must be {lang}. Output value must be {lang}.
+
+Example JSON Output (JA):
 {{
-  "weights": {{
-    "health": <int 1-10>,
-    "connections": <int 1-10>,
-    "freedom": <int 1-10>,
-    "growth": <int 1-10>,
-    "savings": <int 1-10>
-  }},
-  "custom_item": {{
-    "name": "<string>",
-    "initial_cost": <int USD>,
-    "monthly_cost": <int USD>,
-    "health": <int -10 to 10>,
-    "connections": <int -10 to 10>,
-    "freedom": <int -10 to 10>,
-    "growth": <int -10 to 10>
-  }}
+  "concept": "自由と成長の両立プラン",
+  "analysis": "高い成長意欲と自由への欲求に基づき、オンライン講座とバイクメインの移動を選択しました。貯蓄目標は未達成ですが、自己投資を優先するあなたの価値観を体現しています。",
+  "blind_spot": "自己投資に偏りすぎて、長期的な資産形成が疎かになる恐れがあります。",
+  "next_action": "明日、Udemyで興味のある講座を1つリストアップしてください。"
 }}
 """
+
+    prompt = f"""
+User: Age {user_profile.get('age', 'N/A')} / {user_profile.get('family', 'N/A')}
+Value Weights: Health={weights['health']}, Connections={weights['connections']}, Freedom={weights['freedom']}, Growth={weights['growth']}, Savings={weights['savings']}
+
+Optimization Result:
+- Items selected: {', '.join(selected_names) or 'None'}
+- Total Monthly Cost: ${result['total_monthly_cost']}
+- Actual Monthly Savings: ${result['actual_monthly_savings']}
+- Goal Achievement Rate: {result.get('savings_rate', 0):.0%}
+"""
+
     try:
-        response = _client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=prompt,
-            # 推論のブレを抑えるため、既存関数と同じく0.1に設定
-            config=types.GenerateContentConfig(temperature=0.1)
+        response = _client.generate_content(
+            contents=f"{sys_prompt}\n\n{prompt}"
         )
-        text  = response.text.strip()
+        text = response.text.strip()
         start = text.find("{")
-        end   = text.rfind("}") + 1
-        
+        end = text.rfind("}") + 1
         if start == -1 or end <= start:
             return None
-            
-        raw = json.loads(text[start:end])
-        return raw
-        
+        return json.loads(text[start:end])
     except Exception as e:
-        print(f"LLM profiling error: {e}")
+        print(f"Gemini Summary Error: {e}")
         return None

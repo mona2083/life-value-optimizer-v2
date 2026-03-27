@@ -1,103 +1,135 @@
 import streamlit as st
 import pandas as pd
+
+# ローカルモジュールのインポート
+import ui
+from optimizer import run_optimizer
 from lang import LANG
-from default_items import DEFAULT_ITEMS, CATEGORIES
-import ui as ui_mod
+from default_items import CATEGORIES, CATEGORY_CONSTRAINTS
 
-st.set_page_config(page_title="Life-Value Optimizer", layout="wide")
+# =====================================================================
+# 初期設定・状態管理
+# =====================================================================
+st.set_page_config(page_title="Life-Value Optimizer", page_icon="⚖️", layout="wide")
 
-PORTFOLIO_URL = "https://mona2083.github.io/portfolio-2026/index.html"
+if "lang" not in st.session_state:
+    st.session_state.lang = "ja"
 
-# ── カスタムCSS ────────────────────────────────────────────────────
-st.markdown("""
-<style>
-div[data-testid="stButton"] > button {
-    font-size: 0.7rem !important;
-    padding: 2px 10px !important;
-    height: auto !important;
-    line-height: 1.4 !important;
-    white-space: nowrap !important;
-}
-</style>
-""", unsafe_allow_html=True)
+# 翻訳辞書の取得
+lang = st.session_state.lang
+T = LANG[lang]
 
+# カテゴリごとのDataFrame初期化（セッションステートで保持）
+if "category_dfs" not in st.session_state:
+    st.session_state.category_dfs = ui.init_category_dfs()
 
-def _build_category_df(lang: str, category: str) -> pd.DataFrame:
-    name_key = "name_ja" if lang == "ja" else "name_en"
-    note_key = "note_ja" if lang == "ja" else "note_en"
-    rows = []
-    for item in DEFAULT_ITEMS:
-        if item["category"] != category:
-            continue
-        rows.append({
-            "name":         item[name_key],
-            "initial_cost": item["initial_cost"],
-            "monthly_cost": item["monthly_cost"],
-            "health":       item["health"],
-            "connections":  item["connections"],
-            "freedom":      item["freedom"],
-            "growth":       item["growth"],
-            "priority":     item.get("priority", 0),
-            "mandatory":    False,
-            "category":     item["category"],
-            "note":         item.get(note_key, ""),
-        })
-    return pd.DataFrame(rows)
-
-
-def _init_all_category_dfs(lang: str) -> dict:
-    return {cat: _build_category_df(lang, cat) for cat in CATEGORIES[lang]}
-
-
-# ── サイドバーと言語選択 ──────────────────────────────────────────
+# =====================================================================
+# サイドバー（言語設定・リセット）
+# =====================================================================
 with st.sidebar:
-    lang_choice = st.radio("🌐 Language / 言語", ["日本語", "English"], horizontal=True)
-    lang = "ja" if lang_choice == "日本語" else "en"
-    T = LANG[lang]
-    st.link_button(T["portfolio_btn"], PORTFOLIO_URL)
-    st.divider()
+    st.title("⚙️ Settings")
+    new_lang = st.radio("Language / 言語", ["ja", "en"], index=0 if lang == "ja" else 1)
+    if new_lang != lang:
+        st.session_state.lang = new_lang
+        st.rerun()
 
-# ── セッション初期化 ──────────────────────────────────────────────
-if "items_lang" not in st.session_state or st.session_state.items_lang != lang:
-    st.session_state.items_lang    = lang
-    st.session_state.category_dfs = _init_all_category_dfs(lang)
+    if st.button(T["reset_btn"]):
+        for key in list(st.session_state.keys()):
+            if key != "lang":
+                del st.session_state[key]
+        st.rerun()
 
-# ── ヘッダー ──────────────────────────────────────────────────────
-head_l, head_r = st.columns([0.78, 0.22], vertical_alignment="center")
-with head_l:
-    st.title(T["title"])
-    st.caption(T["caption"])
-with head_r:
-    st.link_button(T["portfolio_label"], PORTFOLIO_URL, use_container_width=True)
+st.title(T["title"])
+st.markdown(T["desc"])
 
-# ── UIモジュールの呼び出し（ビジネスロジックの分離） ───────────────
-(
-    age, gender, family, monthly_income, rent, utilities,
-    internet, groceries, health_insurance_fixed, other_fixed,
-    disposable_income, total_budget,
-) = ui_mod.render_step1(T, lang)
+# =====================================================================
+# メインフロー（新UI：9つのステップ）
+# =====================================================================
 
-(
-    savings_period_years, target_monthly_savings,
-    w_health, w_connections, w_freedom, w_growth, w_savings,
-) = ui_mod.render_step2(T, lang)
+# 1. 使える金額の確定 & 2. リスクコスト & 3. 収入見込み & 4. 貯金目標
+# （これらは「基本の財務設定」として1つのUI関数にまとめます）
+financial_data = ui.render_financial_setup(T, lang)
 
-lifestyle_adj = ui_mod.render_step2_5(T, lang, disposable_income, savings_period_years)
+st.divider()
 
-ui_mod.render_step3(T, lang)
+# 5. 現在の生活ヒアリング（定型質問：Q1〜Q5）
+# ここで回答された内容は dict として受け取り、後続のアイテム補正やLLM推論に使います
+lifestyle_data = ui.render_lifestyle_questions(T, lang)
 
-ui_mod.render_risk_and_results(
-    T=T,
-    lang=lang,
-    age=int(age),
-    family=family,
-    savings_period_years=int(savings_period_years),
-    total_budget=int(total_budget),
-    target_monthly_savings=int(target_monthly_savings),
-    w_health=int(w_health),
-    w_connections=int(w_connections),
-    w_freedom=int(w_freedom),
-    w_growth=int(w_growth),
-    w_savings=int(w_savings),
-    lifestyle_adj=lifestyle_adj,
+st.divider()
+
+# 6. 価値観のLLM推論（ハイブリッド・プロファイリング）
+# Step 5の定型データと、ユーザーの自由記述を合わせてLLMに投げ、スライダーを自動設定します
+weights_data = ui.render_llm_profiling(T, lang, lifestyle_data, financial_data)
+
+st.divider()
+
+# 7. アイテム修正（Optional）
+# 裏側で補正されたアイテム一覧を表示し、微調整したいユーザーだけが触る画面
+ui.render_item_review(T, lang)
+
+st.divider()
+
+# 8. サマリー表示 & 9. 最適化の実行
+st.header("🚀 Step 8 & 9: Summary & Optimize")
+st.info("設定が完了しました。現在の予算と価値観に基づき、最高のライフスタイルを計算します。")
+use_ai_for_optimize = st.toggle(
+    T.get("use_ai_for_optimize", "🤖 AIを使って最適化結果サマリーを作成"),
+    value=True,
+    key="use_ai_for_optimize",
 )
+
+if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
+    with st.spinner("数理最適化エンジンを実行中..."):
+        # 最適化エンジンに渡す全候補アイテムのリストを構築
+        candidates = []
+        for cat, df in st.session_state.category_dfs.items():
+            for idx, row in df.iterrows():
+                # UI側のセッションステート（スライダー等の値）から最新の状態を取得
+                pri = st.session_state.get(f"priority_{cat}_{idx}", row["priority"])
+                mand = st.session_state.get(f"mandatory_{cat}_{idx}", row["mandatory"])
+                ic = st.session_state.get(f"initial_cost_{cat}_{idx}", row["initial_cost"])
+                mc = st.session_state.get(f"monthly_cost_{cat}_{idx}", row["monthly_cost"])
+                
+                # 優先度が0（除外）のものはオミット
+                if pri > 0:
+                    candidates.append({
+                        "id": f"{cat}_{idx}",
+                        "name": row["name"],
+                        "name_ja": row.get("name_ja", row["name"]),
+                        "name_en": row.get("name_en", row["name"]),
+                        "category": cat,
+                        "priority": pri,
+                        "mandatory": mand,
+                        "initial_cost": ic,
+                        "monthly_cost": mc,
+                        "health": row["health"],
+                        "connections": row["connections"],
+                        "freedom": row["freedom"],
+                        "growth": row["growth"]
+                    })
+
+        # financial_data と weights_data を展開してオプティマイザーに渡す
+        result = run_optimizer(
+            items=candidates,
+            total_budget=int(financial_data["initial_budget"]),
+            monthly_budget=int(financial_data["monthly_budget"]),
+            target_monthly_savings=int(financial_data["target_monthly_savings"]),
+            weights={
+                "health": int(weights_data["health"]),
+                "connections": int(weights_data["connections"]),
+                "freedom": int(weights_data["freedom"]),
+                "growth": int(weights_data["growth"]),
+                "savings": int(weights_data["savings"]),
+            },
+        )
+
+        # 結果の描画（AIライフコーチダッシュボード含む）
+        ui.render_risk_and_results(
+            result,
+            financial_data["user_profile"],
+            weights_data,
+            T,
+            lang,
+            use_ai_for_summary=use_ai_for_optimize,
+        )
