@@ -91,8 +91,8 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                 ic = st.session_state.get(f"initial_cost_{cat}_{idx}", row["initial_cost"])
                 mc = st.session_state.get(f"monthly_cost_{cat}_{idx}", row["monthly_cost"])
                 
-                # 優先度が0（除外）のものはオミット
-                if pri > 0:
+                # 優先度0は除外。ただし必須指定は候補に残す
+                if pri > 0 or mand:
                     candidates.append({
                         "id": f"{cat}_{idx}",
                         "name": row["name"],
@@ -124,6 +124,42 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
             },
         )
 
+        # 必須が原因で解が出ない場合は、必須をソフト化してベストエフォート再実行
+        mandatory_ids = [c["id"] for c in candidates if c.get("mandatory")]
+        if result.get("status") != "ok" and mandatory_ids:
+            relaxed_candidates = []
+            for c in candidates:
+                cc = dict(c)
+                if cc.get("id") in mandatory_ids:
+                    cc["mandatory"] = False
+                    # 必須解除後も優先されるよう強い優先度を付与
+                    cc["priority"] = max(int(cc.get("priority", 0)), 10)
+                relaxed_candidates.append(cc)
+
+            relaxed_result = run_optimizer(
+                items=relaxed_candidates,
+                total_budget=int(financial_data["initial_budget"]),
+                monthly_budget=int(financial_data["monthly_budget"]),
+                target_monthly_savings=int(financial_data["target_monthly_savings"]),
+                weights={
+                    "health": int(weights_data["health"]),
+                    "connections": int(weights_data["connections"]),
+                    "freedom": int(weights_data["freedom"]),
+                    "growth": int(weights_data["growth"]),
+                    "savings": int(weights_data["savings"]),
+                },
+            )
+            if relaxed_result.get("status") == "ok":
+                selected_ids = {it.get("id") for it in relaxed_result.get("selected", [])}
+                missed_ids = [mid for mid in mandatory_ids if mid not in selected_ids]
+                id_to_item = {c["id"]: c for c in candidates}
+                missed_items = [id_to_item[mid] for mid in missed_ids if mid in id_to_item]
+                relaxed_result["best_effort_mandatory_relaxed"] = True
+                relaxed_result["relaxed_mandatory_count"] = len(mandatory_ids)
+                relaxed_result["missed_mandatory_count"] = len(missed_ids)
+                relaxed_result["missed_mandatory_items"] = missed_items
+                result = relaxed_result
+
         # 結果の描画（AIライフコーチダッシュボード含む）
         ui.render_risk_and_results(
             result,
@@ -132,4 +168,5 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
             T,
             lang,
             use_ai_for_summary=use_ai_for_optimize,
+            financial_data=financial_data,
         )
