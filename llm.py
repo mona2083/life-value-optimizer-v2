@@ -43,11 +43,22 @@ def _choice_letter(option_str: str) -> str | None:
     return None
 
 
+# Step3 Q4（栄養ゼリー）の選択肢に対応する「食」の重み（1〜10）
+JELLY_FOOD_WEIGHT = {"A": 1, "B": 5, "C": 9, "D": 3}
+
+
+def food_weight_from_jelly(q_jelly: str | None) -> int:
+    letter = _choice_letter(q_jelly or "")
+    v = JELLY_FOOD_WEIGHT.get(letter, 5)
+    return max(1, min(10, int(v)))
+
+
 def infer_weights_from_survey(
     lifestyle_data: dict,
     financial_data: dict,
     value_quiz: dict,
     free_text: str = "",
+    food_data: dict | None = None,
 ) -> dict:
     """
     LLM が使えないとき用のルールベース推定。
@@ -105,11 +116,16 @@ def infer_weights_from_survey(
     elif ws == "C":
         bump({"connections": 1.0})
 
-    di = _choice_letter(lifestyle_data.get("diet", ""))
-    if di == "A":
-        bump({"health": 2.0, "savings": 1.0})
-    elif di == "C":
-        bump({"connections": 1.0, "health": -0.5})
+    food = food_data or lifestyle_data.get("food") or {}
+    hm = food.get("home_meal_style", "")
+    if hm == "minimalist":
+        bump({"health": 1.5, "savings": 1.5})
+    elif hm == "health_conscious":
+        bump({"health": 2.5, "growth": 0.5})
+    elif hm == "time_saving":
+        bump({"freedom": 1.5, "connections": 0.5})
+    elif hm == "standard":
+        bump({"health": 0.5})
 
     so = _choice_letter(lifestyle_data.get("social", ""))
     if so == "A":
@@ -178,7 +194,7 @@ Determine a weight from 1 to 10 for each of the following five values:
 【Analysis Logic】
 1. Start with a baseline (all 5) and use 'value_quiz' answers (based on established psychological trade-offs) as primary indicators.
 2. Analyze 'passion_free_text' for 'passion points'. If they mentioned specific passion (e.g., 'fandom', 'motorcycle', 'gym'), significantly increase the relevant value weight.
-3. Consider 'lifestyle_fact' (e.g., work style, diet) and 'financial_goal' as constraints and context.
+3. Consider 'lifestyle_fact' (e.g., work style, food habits) and 'financial_goal' as constraints and context.
 4. If there is a contradiction between their stated goal (e.g., 'savings' high) and their passion text (e.g., 'traveling a lot'), prioritize the passion text as the latent value, and slightly reduce the stated goal weight.
 
 Must return ONLY a valid JSON object. Do not include markdown or backticks.
@@ -252,7 +268,7 @@ Example JSON Output (JA):
 
     prompt = f"""
 User: Age {user_profile.get('age', 'N/A')} / {user_profile.get('family', 'N/A')}
-Value Weights: Health={weights['health']}, Connections={weights['connections']}, Freedom={weights['freedom']}, Growth={weights['growth']}, Savings={weights['savings']}
+Value Weights: Health={weights['health']}, Connections={weights['connections']}, Freedom={weights['freedom']}, Growth={weights['growth']}, Savings={weights['savings']}, Food={weights.get('food', 5)}
 
 Optimization Result:
 - Items selected: {', '.join(selected_names) or 'None'}

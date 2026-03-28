@@ -52,15 +52,22 @@ financial_data = ui.render_financial_setup(T, lang)
 
 st.divider()
 
-# 5. 現在の生活ヒアリング（定型質問：Q1〜Q5）
-# ここで回答された内容は dict として受け取り、後続のアイテム補正やLLM推論に使います
+# 5. 現在のライフスタイル（Q1〜Q5）＋ 5b. 食事・外食（推定食費用）
+# 回答は dict として受け取り、後続のアイテム補正・食費推定・LLM推論に使います
 lifestyle_data = ui.render_lifestyle_questions(T, lang)
+food_data = ui.render_food_questions(T, lang)
+lifestyle_data["food"] = food_data
+
+# 食費推定（UI表示はしない。後続のロジック連携用に保持）
+food_estimation = ui.estimate_food_cost(financial_data["user_profile"], lifestyle_data)
+financial_data["estimated_food_cost"] = food_estimation
+st.session_state["estimated_food_cost"] = food_estimation
 
 st.divider()
 
 # 6. 価値観のLLM推論（ハイブリッド・プロファイリング）
 # Step 5の定型データと、ユーザーの自由記述を合わせてLLMに投げ、スライダーを自動設定します
-weights_data = ui.render_llm_profiling(T, lang, lifestyle_data, financial_data)
+weights_data = ui.render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=food_data)
 
 st.divider()
 
@@ -81,6 +88,15 @@ use_ai_for_optimize = st.toggle(
 
 if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
     with st.spinner("数理最適化エンジンを実行中..."):
+        food_info = financial_data.get("estimated_food_cost", {}) or {}
+        minimalist_floor = float(food_info.get("minimalist_floor_cost", 0) or 0)
+        food_stage1_max = int(float(food_info.get("food_stage1_band_max", 0) or 0))
+        food_stage2_max = int(float(food_info.get("food_stage2_band_max", 0) or 0))
+        optimizer_monthly_budget = max(
+            0,
+            int(financial_data["monthly_budget"]) - int(round(minimalist_floor)),
+        )
+
         # 最適化エンジンに渡す全候補アイテムのリストを構築
         candidates = []
         for cat, df in st.session_state.category_dfs.items():
@@ -109,64 +125,93 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                         "growth": row["growth"]
                     })
 
-        # financial_data と weights_data を展開してオプティマイザーに渡す
-        result = run_optimizer(
-            items=candidates,
-            total_budget=int(financial_data["initial_budget"]),
-            monthly_budget=int(financial_data["monthly_budget"]),
-            target_monthly_savings=int(financial_data["target_monthly_savings"]),
-            weights={
+        result = None
+        if not candidates:
+            st.warning(
+                T.get(
+                    "opt_no_candidates",
+                    "候補アイテムがありません。Step 4 で少なくとも1件、優先度を1以上にするか必須にしてください。",
+                )
+            )
+        else:
+            weights_core = {
                 "health": int(weights_data["health"]),
                 "connections": int(weights_data["connections"]),
                 "freedom": int(weights_data["freedom"]),
                 "growth": int(weights_data["growth"]),
                 "savings": int(weights_data["savings"]),
-            },
-        )
+                "food": int(weights_data.get("food", 5)),
+            }
+            tb = int(financial_data["initial_budget"])
+            tms = int(financial_data["target_monthly_savings"])
 
-        # 必須が原因で解が出ない場合は、必須をソフト化してベストエフォート再実行
-        mandatory_ids = [c["id"] for c in candidates if c.get("mandatory")]
-        if result.get("status") != "ok" and mandatory_ids:
-            relaxed_candidates = []
-            for c in candidates:
-                cc = dict(c)
-                if cc.get("id") in mandatory_ids:
-                    cc["mandatory"] = False
-                    # 必須解除後も優先されるよう強い優先度を付与
-                    cc["priority"] = max(int(cc.get("priority", 0)), 10)
-                relaxed_candidates.append(cc)
+            def _run_opt(items, fs1, fs2, require_transport: bool):
+                return run_optimizer(
+                    items=items,
+                    total_budget=tb,
+                    monthly_budget=optimizer_monthly_budget,
+                    target_monthly_savings=tms,
+                    weights=weights_core,
+                    food_stage1_max=fs1,
+                    food_stage2_max=fs2,
+                    require_transport=require_transport,
+                )
 
-            relaxed_result = run_optimizer(
-                items=relaxed_candidates,
-                total_budget=int(financial_data["initial_budget"]),
-                monthly_budget=int(financial_data["monthly_budget"]),
-                target_monthly_savings=int(financial_data["target_monthly_savings"]),
-                weights={
-                    "health": int(weights_data["health"]),
-                    "connections": int(weights_data["connections"]),
-                    "freedom": int(weights_data["freedom"]),
-                    "growth": int(weights_data["growth"]),
-                    "savings": int(weights_data["savings"]),
-                },
-            )
-            if relaxed_result.get("status") == "ok":
-                selected_ids = {it.get("id") for it in relaxed_result.get("selected", [])}
+            mandatory_ids = [c["id"] for c in candidates if c.get("mandatory")]
+            working = candidates
+            mandatory_relaxed_applied = False
+
+            result = _run_opt(working, food_stage1_max, food_stage2_max, True)
+
+            if result.get("status") != "ok" and mandatory_ids:
+                working = []
+                for c in candidates:
+                    cc = dict(c)
+                    if cc.get("id") in mandatory_ids:
+                        cc["mandatory"] = False
+                        cc["priority"] = max(int(cc.get("priority", 0)), 10)
+                    working.append(cc)
+                mandatory_relaxed_applied = True
+                result = _run_opt(working, food_stage1_max, food_stage2_max, True)
+
+            if result.get("status") != "ok":
+                result = _run_opt(working, 0, 0, True)
+                if result.get("status") == "ok":
+                    result["best_effort_zero_food_stages"] = True
+
+            if result.get("status") != "ok":
+                result = _run_opt(working, 0, 0, False)
+                if result.get("status") == "ok":
+                    result["best_effort_transport_optional"] = True
+
+            if (
+                result.get("status") == "ok"
+                and mandatory_relaxed_applied
+                and mandatory_ids
+            ):
+                selected_ids = {it.get("id") for it in result.get("selected", [])}
                 missed_ids = [mid for mid in mandatory_ids if mid not in selected_ids]
                 id_to_item = {c["id"]: c for c in candidates}
                 missed_items = [id_to_item[mid] for mid in missed_ids if mid in id_to_item]
-                relaxed_result["best_effort_mandatory_relaxed"] = True
-                relaxed_result["relaxed_mandatory_count"] = len(mandatory_ids)
-                relaxed_result["missed_mandatory_count"] = len(missed_ids)
-                relaxed_result["missed_mandatory_items"] = missed_items
-                result = relaxed_result
+                result["best_effort_mandatory_relaxed"] = True
+                result["relaxed_mandatory_count"] = len(mandatory_ids)
+                result["missed_mandatory_count"] = len(missed_ids)
+                result["missed_mandatory_items"] = missed_items
 
         # 結果の描画（AIライフコーチダッシュボード含む）
-        ui.render_risk_and_results(
-            result,
-            financial_data["user_profile"],
-            weights_data,
-            T,
-            lang,
-            use_ai_for_summary=use_ai_for_optimize,
-            financial_data=financial_data,
-        )
+        if result is not None:
+            ui.render_risk_and_results(
+                result,
+                financial_data["user_profile"],
+                weights_data,
+                T,
+                lang,
+                use_ai_for_summary=use_ai_for_optimize,
+                financial_data={
+                    **financial_data,
+                    "monthly_budget": optimizer_monthly_budget,
+                    "food_minimalist_floor": minimalist_floor,
+                    "food_stage1_cap": food_stage1_max,
+                    "food_stage2_cap": food_stage2_max,
+                },
+            )

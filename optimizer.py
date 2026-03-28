@@ -1,5 +1,37 @@
 from ortools.sat.python import cp_model
 
+
+def food_related_score(item: dict) -> int:
+    """
+    食生活に結びつきやすいアイテムほど高いスコア（0〜20程度）。
+    living / 一部 wellbeing・leisure を対象。
+    """
+    cat = item.get("category", "") or ""
+    h = int(item.get("health", 0) or 0)
+    c = int(item.get("connections", 0) or 0)
+    g = int(item.get("growth", 0) or 0)
+    if cat == "living":
+        return max(0, min(20, (h + c + g + 27) // 3))
+    if cat == "wellbeing":
+        return max(0, min(15, (h + 5) // 2))
+    if cat == "leisure":
+        n = (item.get("name_ja") or "") + (item.get("name_en") or "")
+        if any(
+            k in n
+            for k in (
+                "飲み",
+                "交際",
+                "Dining",
+                "Social",
+                "Coffee",
+                "カフェ",
+                "Cafe",
+            )
+        ):
+            return max(0, min(15, (c + h + 10) // 2))
+    return 0
+
+
 def _calc_priority_weights(candidates: list[dict]) -> list[float]:
     priorities = [item.get("priority", 1) for item in candidates]
     unique_p   = sorted(set(priorities))
@@ -14,11 +46,15 @@ def _calc_priority_weights(candidates: list[dict]) -> list[float]:
 
 def _base_utility(item: dict, weights: dict) -> int:
     # 【修正】すべてのスコアに +10 を加算し、マイナス効用による無条件除外バグを防止
+    fw = int(weights.get("food", 5))
+    fr = food_related_score(item)
+    food_term = fw * (fr + 10) * 40
     return (
         weights["health"]      * (int(item["health"]) + 10)      * 100 +
         weights["connections"] * (int(item["connections"]) + 10) * 100 +
         weights["freedom"]     * (int(item["freedom"]) + 10)     * 100 +
         weights["growth"]      * (int(item["growth"]) + 10)      * 100
+        + food_term
     )
 
 def run_optimizer(
@@ -27,6 +63,9 @@ def run_optimizer(
     monthly_budget: int,
     target_monthly_savings: int,
     weights: dict,
+    food_stage1_max: int = 0,
+    food_stage2_max: int = 0,
+    require_transport: bool = True,
 ) -> dict:
     candidates = [
         item for item in items
@@ -49,11 +88,21 @@ def run_optimizer(
             model.Add(x[i] == 1)
 
     model.Add(sum(x[i] * candidates[i]["initial_cost"] for i in range(n)) <= total_budget)
-    model.Add(sum(x[i] * candidates[i]["monthly_cost"]  for i in range(n)) <= monthly_budget)
+    food_stage1_max = max(int(food_stage1_max or 0), 0)
+    food_stage2_max = max(int(food_stage2_max or 0), 0)
+    food_stage1_var = model.NewIntVar(0, food_stage1_max, "food_stage1_var")
+    food_stage2_var = model.NewIntVar(0, food_stage2_max, "food_stage2_var")
+    model.Add(
+        sum(x[i] * candidates[i]["monthly_cost"] for i in range(n))
+        + food_stage1_var
+        + food_stage2_var
+        <= monthly_budget
+    )
 
     transport_idx = [i for i, item in enumerate(candidates) if item.get("category") == "transport"]
     if transport_idx:
-        model.Add(sum(x[i] for i in transport_idx) >= 1)
+        if require_transport:
+            model.Add(sum(x[i] for i in transport_idx) >= 1)
         model.Add(sum(x[i] for i in transport_idx) <= 1)
 
     pet_idx = [i for i, item in enumerate(candidates)
@@ -75,7 +124,12 @@ def run_optimizer(
     items_value = sum(x[i] * utilities[i] for i in range(n))
 
     total_monthly_cost_var = model.NewIntVar(0, monthly_budget, "total_monthly_cost")
-    model.Add(total_monthly_cost_var == sum(x[i] * candidates[i]["monthly_cost"] for i in range(n)))
+    model.Add(
+        total_monthly_cost_var
+        == sum(x[i] * candidates[i]["monthly_cost"] for i in range(n))
+        + food_stage1_var
+        + food_stage2_var
+    )
     actual_savings_var = model.NewIntVar(0, monthly_budget, "actual_savings")
     model.Add(actual_savings_var == monthly_budget - total_monthly_cost_var)
 
@@ -85,8 +139,61 @@ def run_optimizer(
     _raw_savings_coefficient = (total_max_utility * weights["savings"]) / (10 * max(monthly_budget, 1))
     savings_coefficient = max(1 if weights["savings"] > 0 else 0, int(_raw_savings_coefficient))
     
-    savings_value = model.NewIntVar(0, int(monthly_budget * savings_coefficient) + 1, "savings_value")
-    model.Add(savings_value == actual_savings_var * savings_coefficient)
+    # 貯蓄の効用は「目標達成分」だけを強く評価する。
+    # 目標超過分まで同じ係数で伸びると、余剰があっても Stage2（贅沢枠）より
+    # 「さらに貯める」方向に目的関数が寄り、Stage2 が常に 0 になりやすい。
+    if target_monthly_savings > 0:
+        ts = model.NewIntVar(0, monthly_budget, "target_monthly_savings_fixed")
+        model.Add(ts == target_monthly_savings)
+        savings_to_goal = model.NewIntVar(0, monthly_budget, "savings_to_goal")
+        model.AddMinEquality(savings_to_goal, [actual_savings_var, ts])
+        savings_value = model.NewIntVar(0, int(monthly_budget * savings_coefficient) + 1, "savings_value")
+        model.Add(savings_value == savings_to_goal * savings_coefficient)
+    else:
+        savings_value = model.NewIntVar(0, int(monthly_budget * savings_coefficient) + 1, "savings_value")
+        model.Add(savings_value == actual_savings_var * savings_coefficient)
+
+    # ===== 食の2段階モデルを目的関数に反映 =====
+    # Stage1: C_min -> C_survey（“希望水準まで到達”を強く促す）
+    # Stage2: C_survey -> C_max（“食の重み”に比例して贅沢アップグレード）
+    food_weight = max(int(weights.get("food", 5) or 0), 1)
+    # food_weight(1-10)に応じてStage1の強制度を可変化
+    # 低ウェイト: できれば埋める / 高ウェイト: ほぼ最優先で埋める
+    _fw_norm = (food_weight - 1) / 9.0  # 0.0 .. 1.0
+    FOOD_STAGE1_VALUE_PER_DOLLAR = int(80 + 560 * _fw_norm)  # 80 .. 640
+    FOOD_STAGE2_VALUE_PER_DOLLAR_BASE = 32  # Stage2は食の重みに比例
+
+    food_stage1_value_var = model.NewIntVar(
+        0,
+        food_stage1_max * FOOD_STAGE1_VALUE_PER_DOLLAR,
+        "food_stage1_value",
+    )
+    model.Add(food_stage1_value_var == food_stage1_var * FOOD_STAGE1_VALUE_PER_DOLLAR)
+
+    food_stage2_value_var = model.NewIntVar(
+        0,
+        food_stage2_max * food_weight * FOOD_STAGE2_VALUE_PER_DOLLAR_BASE,
+        "food_stage2_value",
+    )
+    model.Add(
+        food_stage2_value_var
+        == food_stage2_var * food_weight * FOOD_STAGE2_VALUE_PER_DOLLAR_BASE
+    )
+
+    # Stage1（希望水準まで）は最優先で満たす。
+    # 予算制約で満たせない場合のみ不足を許容し、不足額に強いペナルティを課す。
+    food_stage1_deficit_var = model.NewIntVar(0, food_stage1_max, "food_stage1_deficit")
+    model.Add(food_stage1_deficit_var == food_stage1_max - food_stage1_var)
+    FOOD_STAGE1_DEFICIT_PENALTY = int(5000 + 95000 * _fw_norm)  # 5,000 .. 100,000
+    food_stage1_deficit_penalty_var = model.NewIntVar(
+        0,
+        food_stage1_max * FOOD_STAGE1_DEFICIT_PENALTY,
+        "food_stage1_deficit_penalty",
+    )
+    model.Add(
+        food_stage1_deficit_penalty_var
+        == food_stage1_deficit_var * FOOD_STAGE1_DEFICIT_PENALTY
+    )
 
     # =====================================================================
     # Formulation of Diminishing Returns (Step-wise Penalty)
@@ -124,7 +231,14 @@ def run_optimizer(
     # =====================================================================
     # Update Objective Function: Maximize (Total Utility + Savings Value - Total Penalty)
     # =====================================================================
-    model.Maximize(items_value + savings_value - total_penalty)
+    model.Maximize(
+        items_value
+        + savings_value
+        + food_stage1_value_var
+        + food_stage2_value_var
+        - food_stage1_deficit_penalty_var
+        - total_penalty
+    )
 
     solver = cp_model.CpSolver()
     solver.parameters.random_seed = 42 
@@ -132,9 +246,9 @@ def run_optimizer(
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         selected       = [candidates[i] for i in range(n) if solver.Value(x[i]) == 1]
-        total_initial  = sum(item["initial_cost"] for item in selected)
-        total_monthly  = sum(item["monthly_cost"]  for item in selected)
-        actual_savings = monthly_budget - total_monthly
+        total_initial = sum(item["initial_cost"] for item in selected)
+        total_monthly = solver.Value(total_monthly_cost_var)
+        actual_savings = solver.Value(actual_savings_var)
         savings_rate   = min(actual_savings / target_monthly_savings, 1.0) if target_monthly_savings > 0 else 1.0
 
         return {
@@ -142,6 +256,10 @@ def run_optimizer(
             "selected":              selected,
             "total_initial_cost":    total_initial,
             "total_monthly_cost":    total_monthly,
+            "food_stage1_monthly_cost": solver.Value(food_stage1_var),
+            "food_stage2_monthly_cost": solver.Value(food_stage2_var),
+            "food_stage1_deficit": solver.Value(food_stage1_deficit_var),
+            "food_extra_monthly_cost": solver.Value(food_stage1_var + food_stage2_var),
             "actual_monthly_savings":actual_savings,
             "target_monthly_savings":target_monthly_savings,
             "savings_rate":          savings_rate,
@@ -161,4 +279,8 @@ def _no_solution(monthly_budget: int, target_monthly_savings: int) -> dict:
         "savings_rate":          1.0 if target_monthly_savings == 0 else 0.0,
         "savings_shortfall":     target_monthly_savings,
         "total_value":           0,
+        "food_stage1_monthly_cost": 0,
+        "food_stage2_monthly_cost": 0,
+        "food_stage1_deficit": 0,
+        "food_extra_monthly_cost": 0,
     }
