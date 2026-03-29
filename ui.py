@@ -178,6 +178,8 @@ def apply_dynamic_overrides(lifestyle_data):
     q2 = lifestyle_data.get("work_style", "")
     if "A:" in q2: # リモート
         set_val("living", "エルゴノミクスチェア", "priority", 5)
+    elif "B:" in q2: # ハイブリッド
+        set_val("living", "エルゴノミクスチェア", "priority", 3)
     elif "C:" in q2: # 出社
         set_val("living", "エルゴノミクスチェア", "priority", 0)
 
@@ -243,13 +245,24 @@ def render_financial_setup(T):
         )
 
         monthly_budget = 0
+        debt_repayment = 0
         if know_budget == T.get("yes_calc", ""):
-            monthly_budget = st.number_input(
-                T.get("budget_label", "Monthly budget ($)"),
-                min_value=0,
-                value=1500,
-                step=100,
-            )
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                monthly_budget_raw = st.number_input(
+                    T.get("budget_label", "Monthly budget ($)"),
+                    min_value=0,
+                    value=1500,
+                    step=100,
+                )
+            with col_b2:
+                debt_repayment = st.number_input(
+                    T.get("lbl_debt_repayment", "Loan / Debt repayment ($)"),
+                    min_value=0,
+                    value=0,
+                    step=50,
+                )
+            monthly_budget = monthly_budget_raw - debt_repayment
         else:
             with st.expander(T.get("calc_expander", ""), expanded=True):
                 income = st.number_input(T.get("income_label", ""), value=4000, step=100)
@@ -275,13 +288,19 @@ def render_financial_setup(T):
                         value=120,
                         step=10,
                     )
+                    debt_repayment = st.number_input(
+                        T.get("lbl_debt_repayment", "Loan / Debt repayment ($)"),
+                        min_value=0,
+                        value=0,
+                        step=50,
+                    )
                     other_fixed = st.number_input(
                         T.get("lbl_other_fixed", ""),
                         min_value=0,
                         value=300,
                         step=50,
                     )
-                monthly_budget = income - (rent_util + insurance + telecom + other_fixed)
+                monthly_budget = income - (rent_util + insurance + telecom + debt_repayment + other_fixed)
                 st.info(f"**{T.get('calc_result', '')}:** ${monthly_budget}")
 
         initial_budget = st.number_input(
@@ -354,6 +373,33 @@ def render_financial_setup(T):
     # 内部で毎月の必要貯金額を計算（オプティマイザーに渡すため）
     target_monthly_savings = target_total_savings / (savings_period_years * 12) if savings_period_years > 0 else 0
 
+    # アラート表示: 目標貯蓄額と手取りのギャップを可視化
+    if monthly_budget > 0:
+        savings_ratio = (target_monthly_savings / monthly_budget) * 100
+        if savings_ratio > 100:
+            st.error(
+                T.get("alert_savings_impossible", "").format(
+                    int_target=int(target_monthly_savings),
+                    int_budget=int(monthly_budget)
+                ) or f"⚠️ **少し無茶な目標かもしれません**: 目標から計算される月額貯蓄（${int(target_monthly_savings):,}）が、今の可処分予算（${int(monthly_budget):,}）を超えています。"
+            )
+        elif savings_ratio >= 50:
+            st.warning(
+                T.get("alert_savings_high", "").format(
+                    int_target=int(target_monthly_savings),
+                    int_budget=int(monthly_budget),
+                    ratio=savings_ratio
+                ) or f"⚠️ **かなりストイックな目標です**: 毎月の予算（${int(monthly_budget):,}）に対して、目標貯蓄（${int(target_monthly_savings):,}）が {savings_ratio:.0f}% を占めています。"
+            )
+        elif target_monthly_savings > 0:
+            st.info(
+                T.get("alert_savings_healthy", "").format(
+                    int_target=int(target_monthly_savings),
+                    int_budget=int(monthly_budget),
+                    ratio=savings_ratio
+                ) or f"💡 **現実的な目標です**: 毎月の予算（${int(monthly_budget):,}）のうち、{savings_ratio:.0f}% を貯金に回す計算になります。"
+            )
+
     return {
         "monthly_budget": max(0, monthly_budget),
         "initial_budget": initial_budget,
@@ -367,6 +413,7 @@ def render_financial_setup(T):
             "household_adults": int(adults),
             "household_children": int(children),
             "household_infants": int(infants),
+            "debt_repayment": debt_repayment,
         }
     }
 
@@ -886,6 +933,10 @@ def render_item_review(T, lang):
                     with c3:
                         st.number_input(T.get("lbl_ic", "初期 $"), min_value=0, key=ic_key, on_change=_mark_manual, args=(ic_key,))
 
+def dict_get_or_zero(d, key):
+    res = (d or {}).get(key, 0)
+    return float(res) if res is not None else 0.0
+
 # =====================================================================
 # 結果表示・AIライフコーチ描画
 # =====================================================================
@@ -955,6 +1006,7 @@ def render_risk_and_results(
     target_monthly = float(result.get("target_monthly_savings", 0) or 0)
     actual_monthly = float(result.get("actual_monthly_savings", 0) or 0)
     period_years = int((financial_data or {}).get("savings_period_years", 1) or 1)
+    debt_repayment = float((financial_data or {}).get("user_profile", {}).get("debt_repayment", 0) or 0)
     monthly_rate_raw = (actual_monthly / target_monthly) if target_monthly > 0 else 1.0
     tot_monthly_spend = float(result.get("total_monthly_cost", 0) or 0)
     # 最適化側: monthly_budget = tot_monthly_spend + actual_monthly（常に配分尽くし）
@@ -962,13 +1014,8 @@ def render_risk_and_results(
     initial_used = float(result.get("total_initial_cost", 0) or 0)
     initial_left = max(initial_budget - initial_used, 0)
 
-    if food_floor > 0:
-        st.caption(
-            T.get("dash_food_floor_caption", "").format(floor=int(food_floor)),
-        )
-
     st.subheader(T.get("dash_section_overview_title", ""))
-    monthly_block = "📅 月予算" if lang == "ja" else "📅 Monthly budget"
+    monthly_block = "📅 月次予算" if lang == "ja" else "📅 Monthly budget"
     initial_block = "🧾 初期費用" if lang == "ja" else "🧾 Initial cost"
     savings_block = "💰 貯蓄" if lang == "ja" else "💰 Savings"
     food_block = "🍽️ 食費" if lang == "ja" else "🍽️ Food"
@@ -977,6 +1024,11 @@ def render_risk_and_results(
     with row_a1:
         with st.container(border=True):
             st.markdown(f"**{monthly_block}**")
+            
+            gross_budget = float((financial_data or {}).get("original_monthly_budget", 0) or 0) + debt_repayment
+            risk_cost = float((financial_data or {}).get("risk_monthly_total", 0) or 0)
+            fixed_sum = debt_repayment + dict_get_or_zero(financial_data, "food_minimalist_floor") + risk_cost
+            
             m_left, m_right = st.columns(2)
             with m_left:
                 st.metric(
@@ -984,18 +1036,24 @@ def render_risk_and_results(
                     f"${int(monthly_budget):,}",
                 )
             with m_right:
-                alloc_label = "配分合計" if lang == "ja" else "Allocated total"
+                fixed_label = "月固定費" if lang == "ja" else "Monthly fixed costs"
                 st.metric(
-                    alloc_label,
-                    f"${int(alloc_sum):,}",
+                    fixed_label,
+                    f"${int(fixed_sum):,}",
                 )
-            st.caption(
-                T.get("dash_metric_monthly_pool_help", "").format(
-                    spend=f"${int(tot_monthly_spend):,}",
-                    save=f"${int(actual_monthly):,}",
-                    total=f"${int(alloc_sum):,}",
-                )
-            )
+            
+            deducts = []
+            if debt_repayment > 0:
+                deducts.append(f"ローン(\\${int(debt_repayment):,})" if lang == "ja" else f"Loan (\\${int(debt_repayment):,})")
+            if dict_get_or_zero(financial_data, "food_minimalist_floor") > 0:
+                deducts.append(f"基本食費(\\${int(dict_get_or_zero(financial_data, 'food_minimalist_floor')):,})" if lang == "ja" else f"Base food (\\${int(dict_get_or_zero(financial_data, 'food_minimalist_floor')):,})")
+            if risk_cost > 0:
+                deducts.append(f"リスク(\\${int(risk_cost):,})" if lang == "ja" else f"Risk (\\${int(risk_cost):,})")
+            
+            if deducts:
+                calc_text = f"月固定費内訳：{' + '.join(deducts)}" if lang == "ja" else f"Fixed breakdown: {' + '.join(deducts)}"
+                st.caption(f"💡 {calc_text}")
+
             if abs(alloc_sum - monthly_budget) > 0.51:
                 st.caption(T.get("dash_rounding_note", ""))
 
@@ -1013,11 +1071,10 @@ def render_risk_and_results(
                     T.get("dash_metric_initial_left", ""),
                     f"${int(initial_left):,}",
                 )
-            st.caption(
-                T.get("dash_metric_initial_used", "").format(
-                    used=f"${int(initial_used):,}",
-                )
-            )
+            if lang == "ja":
+                st.caption(f"💡 初期費内訳：予算(\\${int(initial_budget):,}) = 使用済(\\${int(initial_used):,}) + 残額(\\${int(initial_left):,})")
+            else:
+                st.caption(f"💡 Initial breakdown: Budget(\\${int(initial_budget):,}) = Used(\\${int(initial_used):,}) + Left(\\${int(initial_left):,})")
 
     row_b1, row_b2 = st.columns(2)
     with row_b1:
@@ -1034,7 +1091,10 @@ def render_risk_and_results(
                     T.get("dash_metric_savings_rate", ""),
                     f"{monthly_rate_raw:.0%}",
                 )
-            st.caption(T.get("dash_metric_monthly_savings_help", ""))
+            if lang == "ja":
+                st.caption(f"💡 貯蓄内訳：目標額(\\${int(target_monthly):,}) に対する達成率")
+            else:
+                st.caption(f"💡 Savings breakdown: Achievement vs Target(\\${int(target_monthly):,})")
 
     with row_b2:
         with st.container(border=True):
@@ -1052,28 +1112,65 @@ def render_risk_and_results(
                     f"${int(food_stage2_used):,}",
                 )
             if lang == "ja":
-                summary = f"食費合計：固定 ${int(food_floor):,} + 通常食費 ${int(food_stage1_used):,} + {upgrade_label} ${int(food_stage2_used):,}"
+                st.caption(f"💡 食費内訳：固定(\\${int(food_floor):,}) + 通常(\\${int(food_stage1_used):,}) + グレードアップ(\\${int(food_stage2_used):,}) = 合計(\\${int(food_total):,})")
             else:
-                summary = f"Total food: Fixed ${int(food_floor):,} + Standard ${int(food_stage1_used):,} + {upgrade_label} ${int(food_stage2_used):,}"
-            st.caption(summary)
+                st.caption(f"💡 Food breakdown: Base(\\${int(food_floor):,}) + Std(\\${int(food_stage1_used):,}) + Upgrade(\\${int(food_stage2_used):,}) = Total(\\${int(food_total):,})")
 
     # AIライフコーチダッシュボード（予算配分サマリーとカテゴリ別内訳の間に挿入）
     st.divider()
     if not use_ai_for_summary:
         st.caption(T.get("ai_summary_off", "AI summary is turned off."))
-    elif summary := get_result_summary(result, user_profile, weights, lang):
+    elif summary := get_result_summary(
+        result,
+        user_profile,
+        weights,
+        lang,
+        context={
+            "financial_data": financial_data or {},
+            "lifestyle_data": (financial_data or {}).get("lifestyle_data", {}) or {},
+            "food_data": (financial_data or {}).get("food_data", {}) or {},
+            "candidates": (financial_data or {}).get("candidates", []) or [],
+        },
+    ):
         st.subheader(T.get("ai_dashboard", "💡 AI ライフコーチ ダッシュボード"))
         lbl_theme = T.get("theme", "テーマ")
-        lbl_analysis = T.get("analysis", "分析")
+        lbl_analysis = "全体分析" if lang == "ja" else "Overall Analysis"
+        lbl_food_advice = T.get("food_advice", "食費の分析")
+        lbl_savings_advice = T.get("savings_advice", "貯蓄の分析")
         lbl_blind_spot = T.get("blind_spot", "死角・リスク")
         lbl_action = T.get("next_action", "次のアクション")
 
-        st.info(f"**{lbl_theme}:** {summary.get('concept', '')}")
-        st.write(f"**{lbl_analysis}:** {summary.get('analysis', '')}")
-        st.warning(f"**{lbl_blind_spot}:** {summary.get('blind_spot', '')}")
-        st.success(f"**{lbl_action}:** {summary.get('next_action', '')}")
+        concept_text = str(summary.get("concept", "") or "").strip()
+        analysis_text = str(summary.get("analysis", "") or "").strip()
+        food_advice_text = str(summary.get("food_advice", "") or "").strip()
+        savings_advice_text = str(summary.get("savings_advice", "") or "").strip()
+        blind_spot_text = str(summary.get("blind_spot", "") or "").strip()
+        action_text = str(summary.get("next_action", "") or "").strip()
+
+        st.info(f"**{lbl_theme}： {concept_text or ('生成できませんでした' if lang == 'ja' else 'Not generated')}**")
+
+        col_sum_left, col_sum_right = st.columns(2)
+        
+        with col_sum_left:
+            with st.container(border=True):
+                st.markdown(f"**{lbl_analysis}**")
+                st.write(analysis_text or ("分析を生成できませんでした。" if lang == "ja" else "Analysis could not be generated."))
+            with st.container(border=True):
+                st.markdown(f"**{lbl_food_advice}**")
+                st.write(food_advice_text or ("分析を生成できませんでした。" if lang == "ja" else "Analysis could not be generated."))
+            
+        with col_sum_right:
+            with st.container(border=True):
+                st.markdown(f"**{lbl_savings_advice}**")
+                st.write(savings_advice_text or ("分析を生成できませんでした。" if lang == "ja" else "Analysis could not be generated."))
+            with st.container(border=True):
+                st.markdown(f"**{lbl_blind_spot}**")
+                st.write(blind_spot_text or ("現時点で明確な死角は見つかりませんでした。" if lang == "ja" else "No clear blind spot was identified."))
+
+        st.success(f"**{lbl_action}**\n\n{action_text or ('まずは今日できる小さな行動を1つ決めましょう。' if lang == 'ja' else 'Start with one small action you can do today.')}")
     else:
         st.caption(T.get("ai_error_summary", "AIダッシュボードの生成に失敗しました。"))
+    st.divider()
 
     # 2) カテゴリごとの使用額/割合（月/初期）
     if selected:

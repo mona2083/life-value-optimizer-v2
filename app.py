@@ -251,7 +251,11 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                 use_ai_for_summary=use_ai_for_optimize,
                 financial_data={
                     **financial_data,
+                    "lifestyle_data": lifestyle_data,
+                    "food_data": food_data,
+                    "candidates": candidates,
                     "monthly_budget": optimizer_monthly_budget,
+                    "original_monthly_budget": financial_data.get("monthly_budget", 0),
                     "monthly_budget_before_risk": base_monthly_after_food,
                     "risk_monthly_total": risk_monthly_total,
                     "risk_monthly_breakdown": risk_breakdown,

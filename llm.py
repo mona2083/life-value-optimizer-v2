@@ -234,7 +234,13 @@ Age: {age} / Family: {family}
         print(f"Gemini Profile Error: {e}")
         return None
 
-def get_result_summary(result: dict, user_profile: dict, weights: dict, lang: str) -> dict | None:
+def get_result_summary(
+    result: dict,
+    user_profile: dict,
+    weights: dict,
+    lang: str,
+    context: dict | None = None,
+) -> dict | None:
     """
     最適化結果に対するAIライフコーチからのフィードバックを生成する
     """
@@ -245,37 +251,126 @@ def get_result_summary(result: dict, user_profile: dict, weights: dict, lang: st
         name = item["name_ja"] if lang == "ja" else item["name_en"]
         selected_names.append(name)
 
+    ctx = context or {}
+    financial_data = (ctx.get("financial_data") or {}) if isinstance(ctx, dict) else {}
+    lifestyle_data = (ctx.get("lifestyle_data") or {}) if isinstance(ctx, dict) else {}
+    food_data = (ctx.get("food_data") or {}) if isinstance(ctx, dict) else {}
+    candidates = (ctx.get("candidates") or []) if isinstance(ctx, dict) else []
+
+    selected_ids = {item.get("id") for item in result.get("selected", [])}
+    not_selected = [
+        item for item in candidates
+        if item.get("id") not in selected_ids
+    ]
+    non_selected_high_priority = sorted(
+        [item for item in not_selected if int(item.get("priority", 0) or 0) >= 7],
+        key=lambda x: (
+            int(x.get("priority", 0) or 0),
+            -int(x.get("monthly_cost", 0) or 0),
+            -int(x.get("initial_cost", 0) or 0),
+        ),
+        reverse=True,
+    )[:8]
+
+    non_selected_high_priority_names = [
+        (it.get("name_ja") if lang == "ja" else it.get("name_en")) or it.get("name") or "Unknown"
+        for it in non_selected_high_priority
+    ]
+
+    food_decision = "Food Upgrade" if int(result.get("food_stage2_monthly_cost", 0) or 0) > 0 else "Minimalist"
+    if lang == "ja":
+        food_decision = "食のグレードアップ" if food_decision == "Food Upgrade" else "ミニマリスト"
+
+    input_payload = {
+        "user_profile": {
+            "age": user_profile.get("age"),
+            "family": user_profile.get("family"),
+            "household_adults": user_profile.get("household_adults"),
+            "household_children": user_profile.get("household_children"),
+            "household_infants": user_profile.get("household_infants"),
+            "car_owned": user_profile.get("car_owned"),
+            "consider_risk": user_profile.get("consider_risk"),
+        },
+        "lifestyle": {
+            "car_necessity": lifestyle_data.get("car_necessity"),
+            "work_style": lifestyle_data.get("work_style"),
+            "social": lifestyle_data.get("social"),
+            "leisure": lifestyle_data.get("leisure"),
+            "passion_free_text": lifestyle_data.get("passion_free_text"),
+        },
+        "financial_goals": {
+            "monthly_budget": financial_data.get("monthly_budget"),
+            "monthly_budget_before_risk": financial_data.get("monthly_budget_before_risk"),
+            "target_monthly_savings": financial_data.get("target_monthly_savings"),
+            "initial_budget": financial_data.get("initial_budget"),
+            "savings_period_years": financial_data.get("savings_period_years"),
+            "risk_monthly_total": financial_data.get("risk_monthly_total"),
+        },
+        "food_context": {
+            "home_meal_style": food_data.get("home_meal_style"),
+            "minimalist_floor_cost": financial_data.get("food_minimalist_floor"),
+            "stage1_cap": financial_data.get("food_stage1_cap"),
+            "stage2_cap": financial_data.get("food_stage2_cap"),
+            "stage1_used": result.get("food_stage1_monthly_cost", 0),
+            "stage2_used": result.get("food_stage2_monthly_cost", 0),
+            "decision": food_decision,
+        },
+        "weights": {
+            "health": int(weights.get("health", 5)),
+            "connections": int(weights.get("connections", 5)),
+            "freedom": int(weights.get("freedom", 5)),
+            "growth": int(weights.get("growth", 5)),
+            "savings": int(weights.get("savings", 5)),
+            "food": int(weights.get("food", 5)),
+        },
+        "selected_items": selected_names,
+        "excluded_high_priority_items": non_selected_high_priority_names,
+        "result_metrics": {
+            "total_monthly_cost": result.get("total_monthly_cost"),
+            "actual_monthly_savings": result.get("actual_monthly_savings"),
+            "goal_achievement_rate": result.get("savings_rate", 0),
+        },
+    }
+
     sys_prompt = f"""
-You are an expert Life Coach and Behavioral Economist.
-Analyze the optimization result for the user based on their value weights.
-Generate a summary dashboard with four sections:
-1. 'concept': A catchy title for this lifestyle strategy (in 15 chars or 4-5 words).
-2. 'analysis': A logical explanation of why this selection aligns well with their specified value weights (2-3 sentences).
-3. 'blind_spot': One psychological or lifestyle risk/blind spot caused by this selection (1 sentence).
-4. 'next_action': One specific, immediate action they should take starting tomorrow (1 sentence).
+You are a world-class Life Coach, Financial Planner, and Behavioral Psychologist with 30 years of experience.
+Your mission is to provide a "Wake-up Call" analysis that connects mathematical optimization results with the user's soul and deep values.
 
-Must return ONLY a valid JSON object. Do not include markdown.
-Language must be {lang}. Output value must be {lang}.
+【Analysis Directives - DO NOT just summarize the data】
+1. The AI is the Architect, the User provided the Blueprint:
+   DO NOT frame the results as the user's manual choices. Do NOT say "You chose X" or "You sacrificed Y". The user only provided their values; the mathematical Optimizer made the item selections. 
+   Instead, explain *WHY* the Optimizer built this specific plan for them. 
+   Example: "Because your core values heavily lean towards [Value], the system prioritized [Selected Item]. To make this mathematically possible within your budget, the optimizer had to filter out [Excluded Item]."
 
-Example JSON Output (JA):
+2. The Narrative of Trade-offs (Sacrifice):
+   Never just say "You bought X". Focus on what they sacrificed. Explain the psychological trade-off: "To protect your [Core Value], you made the difficult choice to let go of [Excluded Item]." Validate this sacrifice as a strategic life choice.
+
+3. The Psychology of Food:
+   - If Food is 'Minimalist/Base': Frame it positively as "Strategic Austerity" to buy future freedom or fund their other dreams.
+   - If Food is 'Upgraded': Frame it as "Vital Self-Investment", validating that quality food is the engine for their performance and well-being.
+
+4. Savings Reality Check (2026 US Context):
+   Evaluate their savings allocation. Contrast it with their 'Savings' weight. Are they hoarding cash out of fear (sacrificing today's joy), or are they saving too little while claiming security is important? Provide a sharp, grounded perspective.
+
+5. The Blind Spot (Psychological Friction):
+   Find a contradiction between their stated Core Values and their actual budget allocation (e.g., claiming 'Connections' is a 10, but spending $0 on social activities). Point this out gently but firmly as a risk of burnout or regret.
+
+【Output Format】
+Must return ONLY a valid JSON object. Do not include markdown formatting, backticks, or any conversational text outside the JSON.
+The output language MUST be in {lang}.
+
 {{
-  "concept": "自由と成長の両立プラン",
-  "analysis": "高い成長意欲と自由への欲求に基づき、オンライン講座とバイクメインの移動を選択しました。貯蓄目標は未達成ですが、自己投資を優先するあなたの価値観を体現しています。",
-  "blind_spot": "自己投資に偏りすぎて、長期的な資産形成が疎かになる恐れがあります。",
-  "next_action": "明日、Udemyで興味のある講座を1つリストアップしてください。"
+  "concept": "A 1-line catchy, inspiring theme for this AI-proposed life plan (e.g., 'A Strategic Blueprint for Future Freedom').",
+  "analysis": "3-4 sentences explaining WHY the optimizer prioritized certain items and excluded others, framing it as a perfect mathematical translation of their core values.",
+  "food_advice": "2 sentences explaining the optimizer's logic behind their food budget allocation.",
+  "savings_advice": "2 sentences evaluating the calculated savings rate and what it means for their future.",
+  "blind_spot": "A sharp psychological insight pointing out a contradiction between their stated values and the actual mathematical limits of their budget.",
+  "next_action": "One very specific, non-financial micro-action they can do TODAY based on this proposed plan."
 }}
 """
 
-    prompt = f"""
-User: Age {user_profile.get('age', 'N/A')} / {user_profile.get('family', 'N/A')}
-Value Weights: Health={weights['health']}, Connections={weights['connections']}, Freedom={weights['freedom']}, Growth={weights['growth']}, Savings={weights['savings']}, Food={weights.get('food', 5)}
-
-Optimization Result:
-- Items selected: {', '.join(selected_names) or 'None'}
-- Total Monthly Cost: ${result['total_monthly_cost']}
-- Actual Monthly Savings: ${result['actual_monthly_savings']}
-- Goal Achievement Rate: {result.get('savings_rate', 0):.0%}
-"""
+    prompt = """Input Data (JSON):
+""" + json.dumps(input_payload, ensure_ascii=False, indent=2)
 
     try:
         response = _client.generate_content(
