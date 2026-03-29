@@ -6,6 +6,7 @@ import ui
 from optimizer import run_optimizer
 from lang import LANG
 from default_items import CATEGORIES, CATEGORY_CONSTRAINTS
+from risk_cost import calculate_risk_costs
 
 # =====================================================================
 # 初期設定・状態管理
@@ -27,8 +28,13 @@ if "category_dfs" not in st.session_state:
 # サイドバー（言語設定・リセット）
 # =====================================================================
 with st.sidebar:
-    st.title("⚙️ Settings")
-    new_lang = st.radio("Language / 言語", ["ja", "en"], index=0 if lang == "ja" else 1)
+    st.header(f"⚙️ {T.get('sidebar_title', 'Settings')}")
+    new_lang = st.radio(
+        T.get("sidebar_language", "Language"),
+        ["ja", "en"],
+        index=0 if lang == "ja" else 1,
+        format_func=lambda c: "日本語" if c == "ja" else "English",
+    )
     if new_lang != lang:
         st.session_state.lang = new_lang
         st.rerun()
@@ -40,6 +46,7 @@ with st.sidebar:
         st.rerun()
 
 st.title(T["title"])
+st.caption(T.get("caption", ""))
 st.markdown(T["desc"])
 
 # =====================================================================
@@ -48,14 +55,14 @@ st.markdown(T["desc"])
 
 # 1. 使える金額の確定 & 2. リスクコスト & 3. 収入見込み & 4. 貯金目標
 # （これらは「基本の財務設定」として1つのUI関数にまとめます）
-financial_data = ui.render_financial_setup(T, lang)
+financial_data = ui.render_financial_setup(T)
 
 st.divider()
 
 # 5. 現在のライフスタイル（Q1〜Q5）＋ 5b. 食事・外食（推定食費用）
 # 回答は dict として受け取り、後続のアイテム補正・食費推定・LLM推論に使います
 lifestyle_data = ui.render_lifestyle_questions(T, lang)
-food_data = ui.render_food_questions(T, lang)
+food_data = ui.render_food_questions(T)
 lifestyle_data["food"] = food_data
 
 # 食費推定（UI表示はしない。後続のロジック連携用に保持）
@@ -77,9 +84,9 @@ ui.render_item_review(T, lang)
 
 st.divider()
 
-# 8. サマリー表示 & 9. 最適化の実行
-st.header("🚀 Step 8 & 9: Summary & Optimize")
-st.info("設定が完了しました。現在の予算と価値観に基づき、最高のライフスタイルを計算します。")
+# サマリー表示 & 最適化の実行
+st.header(T.get("step89_title", "5. 📊 Summary & optimization"))
+st.info(T.get("step89_intro", ""))
 use_ai_for_optimize = st.toggle(
     T.get("use_ai_for_optimize", "🤖 AIを使って最適化結果サマリーを作成"),
     value=True,
@@ -87,15 +94,50 @@ use_ai_for_optimize = st.toggle(
 )
 
 if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
-    with st.spinner("数理最適化エンジンを実行中..."):
+    with st.spinner(T.get("opt_spinner", "Running optimization…")):
         food_info = financial_data.get("estimated_food_cost", {}) or {}
         minimalist_floor = float(food_info.get("minimalist_floor_cost", 0) or 0)
         food_stage1_max = int(float(food_info.get("food_stage1_band_max", 0) or 0))
         food_stage2_max = int(float(food_info.get("food_stage2_band_max", 0) or 0))
-        optimizer_monthly_budget = max(
+        base_monthly_after_food = max(
             0,
             int(financial_data["monthly_budget"]) - int(round(minimalist_floor)),
         )
+        optimizer_monthly_budget = base_monthly_after_food
+        risk_breakdown = []
+        risk_monthly_total = 0
+
+        profile = (financial_data or {}).get("user_profile", {}) or {}
+        if profile.get("consider_risk"):
+            adults = int(profile.get("household_adults", 1) or 0)
+            children = int(profile.get("household_children", 0) or 0)
+            infants = int(profile.get("household_infants", 0) or 0)
+            num_kids = max(children + infants, 0)
+
+            if num_kids <= 0:
+                family_label = "Single" if adults <= 1 else "Couple"
+            else:
+                family_label = f"Couple + {min(num_kids, 4)} Kid"
+                if num_kids >= 2:
+                    family_label += "s"
+
+            risk_breakdown = calculate_risk_costs(
+                age=int(profile.get("age", 30) or 30),
+                family=family_label,
+                savings_period_years=int(financial_data.get("savings_period_years", 1) or 1),
+                monthly_budget=int(financial_data.get("monthly_budget", 0) or 0),
+                car_selected=bool(lifestyle_data.get("own_car")),
+            )
+            risk_monthly_total = int(
+                sum(float(r.get("monthly_cost", 0) or 0) for r in risk_breakdown)
+            )
+            optimizer_monthly_budget = max(0, base_monthly_after_food - risk_monthly_total)
+
+            st.info(
+                f"{T.get('risk_effective', 'Effective monthly budget after risk costs')}: "
+                f"${optimizer_monthly_budget:,} "
+                f"(base ${base_monthly_after_food:,} - risk ${risk_monthly_total:,})"
+            )
 
         # 最適化エンジンに渡す全候補アイテムのリストを構築
         candidates = []
@@ -210,6 +252,9 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                 financial_data={
                     **financial_data,
                     "monthly_budget": optimizer_monthly_budget,
+                    "monthly_budget_before_risk": base_monthly_after_food,
+                    "risk_monthly_total": risk_monthly_total,
+                    "risk_monthly_breakdown": risk_breakdown,
                     "food_minimalist_floor": minimalist_floor,
                     "food_stage1_cap": food_stage1_max,
                     "food_stage2_cap": food_stage2_max,

@@ -232,104 +232,124 @@ def apply_food_overrides(food_data: dict) -> None:
 # =====================================================================
 # Step 1: お金とリスクの設定
 # =====================================================================
-def render_financial_setup(T, lang):
+def render_financial_setup(T):
     st.header(T.get("step1_title", "1. 💰 予算と目標の設定"))
-    
-    # 1. 使える金額の確定
-    know_budget = st.radio(
-        T.get("know_budget_q", "毎月自由に使える予算（可処分所得）は決まっていますか？"), 
-        [T.get("yes_calc", "はい"), T.get("no_calc", "いいえ、計算する")]
-    )
-    
-    monthly_budget = 0
-    if T.get("yes_calc", "はい") in know_budget:
-        monthly_budget = st.number_input(T.get("budget_label", "毎月の予算 ($)"), min_value=0, value=1500, step=100)
-    else:
-        with st.expander(T.get("calc_expander", "予算の計算"), expanded=True):
-            income = st.number_input(T.get("income_label", "手取り月収 ($)"), value=4000, step=100)
-            st.markdown("**固定費の計算**" if lang == "ja" else "**Fixed Cost Calculation**")
-            col_l, col_r = st.columns(2)
-            with col_l:
-                rent_util = st.number_input(
-                    "家賃+光熱費 ($)" if lang == "ja" else "Rent + Utilities ($)",
-                    min_value=0,
-                    value=1700,
-                    step=50,
-                )
-                insurance = st.number_input(
-                    "保険料 ($)" if lang == "ja" else "Insurance ($)",
-                    min_value=0,
-                    value=200,
-                    step=50,
-                )
-            with col_r:
-                telecom = st.number_input(
-                    "通信費 ($)" if lang == "ja" else "Telecom ($)",
-                    min_value=0,
-                    value=120,
-                    step=10,
-                )
-                other_fixed = st.number_input(
-                    "そのほか ($)" if lang == "ja" else "Other Fixed Costs ($)",
-                    min_value=0,
-                    value=300,
-                    step=50,
-                )
-            monthly_budget = income - (rent_util + insurance + telecom + other_fixed)
-            st.info(f"**{T.get('calc_result', '算出された予算')}:** ${monthly_budget}")
 
-    initial_budget = st.number_input(T.get("initial_budget_label", "初期投資に使える貯金 ($)"), min_value=0, value=5000, step=500)
+    with st.container(border=True):
+        st.subheader(T.get("section_budget", "💵 Monthly budget"))
+        know_budget = st.radio(
+            T.get("know_budget_q", ""),
+            [T.get("yes_calc", "Yes"), T.get("no_calc", "No")],
+        )
 
-    # 2. リスクコストの考慮
-    st.write("---")
-    consider_risk = st.toggle(T.get("risk_toggle", "⚠️ 現実的なリスクを考慮する"), value=False)
-    st.caption(
-        "推定食費の計算に使います（必須）"
-        if lang == "ja"
-        else "Used for estimated food-cost calculation (required)."
-    )
-    col1, col2 = st.columns(2)
-    with col1:
-        age = st.number_input(
-            "本人の年齢" if lang == "ja" else "Your age",
+        monthly_budget = 0
+        if know_budget == T.get("yes_calc", ""):
+            monthly_budget = st.number_input(
+                T.get("budget_label", "Monthly budget ($)"),
+                min_value=0,
+                value=1500,
+                step=100,
+            )
+        else:
+            with st.expander(T.get("calc_expander", ""), expanded=True):
+                income = st.number_input(T.get("income_label", ""), value=4000, step=100)
+                st.markdown(f"**{T.get('calc_fixed_subheading', '')}**")
+                col_l, col_r = st.columns(2)
+                with col_l:
+                    rent_util = st.number_input(
+                        T.get("lbl_rent_util", ""),
+                        min_value=0,
+                        value=1700,
+                        step=50,
+                    )
+                    insurance = st.number_input(
+                        T.get("lbl_insurance", ""),
+                        min_value=0,
+                        value=200,
+                        step=50,
+                    )
+                with col_r:
+                    telecom = st.number_input(
+                        T.get("lbl_telecom", ""),
+                        min_value=0,
+                        value=120,
+                        step=10,
+                    )
+                    other_fixed = st.number_input(
+                        T.get("lbl_other_fixed", ""),
+                        min_value=0,
+                        value=300,
+                        step=50,
+                    )
+                monthly_budget = income - (rent_util + insurance + telecom + other_fixed)
+                st.info(f"**{T.get('calc_result', '')}:** ${monthly_budget}")
+
+        initial_budget = st.number_input(
+            T.get("initial_budget_label", ""),
             min_value=0,
-            max_value=120,
-            value=30,
-            step=1,
+            value=5000,
+            step=500,
         )
-        adults = st.number_input(
-            "同居人数（大人）" if lang == "ja" else "Cohabitants (Adults)",
-            min_value=0,
-            value=1,
-            step=1,
-        )
-    with col2:
-        children = st.number_input(
-            "同居人数（子供）" if lang == "ja" else "Cohabitants (Children)",
-            min_value=0,
-            value=0,
-            step=1,
-        )
-        infants = st.number_input(
-            "同居人数（乳幼児）" if lang == "ja" else "Cohabitants (Infants/Toddlers)",
-            min_value=0,
-            value=0,
-            step=1,
-        )
-    family = (
-        f"大人{int(adults)}・子供{int(children)}・乳幼児{int(infants)}"
-        if lang == "ja"
-        else f"Adults:{int(adults)}, Children:{int(children)}, Infants:{int(infants)}"
+
+    st.divider()
+
+    with st.container(border=True):
+        st.subheader(T.get("section_profile", ""))
+        consider_risk = st.toggle(T.get("risk_toggle", ""), value=False)
+        st.caption(T.get("risk_household_caption", ""))
+        col1, col2 = st.columns(2)
+        with col1:
+            age = st.number_input(
+                T.get("lbl_age", ""),
+                min_value=0,
+                max_value=120,
+                value=30,
+                step=1,
+            )
+            adults = st.number_input(
+                T.get("lbl_adults", ""),
+                min_value=0,
+                value=1,
+                step=1,
+            )
+        with col2:
+            children = st.number_input(
+                T.get("lbl_children", ""),
+                min_value=0,
+                value=0,
+                step=1,
+            )
+            infants = st.number_input(
+                T.get("lbl_infants", ""),
+                min_value=0,
+                value=0,
+                step=1,
+            )
+
+    family = T.get("family_summary_fmt", "").format(
+        adults=int(adults),
+        children=int(children),
+        infants=int(infants),
     )
 
-    # 3 & 4. 貯金目標（総額と期間を聞き、裏で月割りにする）
-    st.write("---")
-    st.subheader(T.get("goals_subdir", "🎯 目標設定"))
-    col3, col4 = st.columns(2)
-    with col3:
-        target_total_savings = st.number_input(T.get("target_total_label", "目標貯金金額 ($)"), min_value=0, value=18000, step=1000)
-    with col4:
-        savings_period_years = st.number_input(T.get("period_label", "目標達成までの期間 (年)"), min_value=1, value=5)
+    st.divider()
+
+    with st.container(border=True):
+        st.subheader(T.get("goals_subdir", "🎯 Goals"))
+        col3, col4 = st.columns(2)
+        with col3:
+            target_total_savings = st.number_input(
+                T.get("target_total_label", ""),
+                min_value=0,
+                value=18000,
+                step=1000,
+            )
+        with col4:
+            savings_period_years = st.number_input(
+                T.get("period_label", ""),
+                min_value=1,
+                value=5,
+            )
 
     # 内部で毎月の必要貯金額を計算（オプティマイザーに渡すため）
     target_monthly_savings = target_total_savings / (savings_period_years * 12) if savings_period_years > 0 else 0
@@ -354,13 +374,27 @@ def render_financial_setup(T, lang):
 # Step 2: 現在の生活ヒアリング（定型質問：ハードファクト）
 # =====================================================================
 def render_lifestyle_questions(T, lang):
-    st.header(T.get("step2_title", "2. 👤 現在のライフスタイル"))
-    st.write(T.get("step2_desc", "あなたに最適な選択肢を絞り込むため、いくつか質問にお答えください。"))
+    st.header(T.get("step2_title", "2. 👤 Current lifestyle"))
+    st.markdown(T.get("step2_desc", ""))
+    st.markdown(
+        """
+        <style>
+        [data-testid="stCheckbox"] {
+            margin-bottom: -0.2rem;
+        }
+        [data-testid="stCheckbox"] label p {
+            margin: 0;
+            line-height: 1;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    q1a_opts = ["A: 車がないと生活できない（必須）", "B: できれば車が欲しいが、なくてもなんとかなる", "C: 公共交通機関や自転車で十分（不要）"] if lang == "ja" else ["A: Car is essential", "B: Nice to have, but not strict", "C: Unnecessary (Transit/Bike is fine)"]
-    q2_opts = ["A: フルリモート（ほぼ在宅）", "B: ハイブリッド（週の半分くらい出社）", "C: フル出社・現場仕事"] if lang == "ja" else ["A: Full Remote", "B: Hybrid", "C: Full Office/On-site"]
-    q4_opts = ["A: 頻繁に行く（お酒も場も好き）", "B: たまに行く程度", "C: 一人の時間を優先したい"] if lang == "ja" else ["A: Frequent", "B: Sometimes", "C: Prefer solo time"]
-    q5_opts = ["A: インドア・リラックス派", "B: アクティブ・アウトドア派", "C: お出かけ・イベント派"] if lang == "ja" else ["A: Indoor / Relax", "B: Active / Outdoor", "C: Outings / Events"]
+    q1a_opts = T.get("lifestyle_q1_options", [])
+    q2_opts = T.get("lifestyle_q_work_options", [])
+    q4_opts = T.get("lifestyle_q_social_options", [])
+    q5_opts = T.get("lifestyle_q_leisure_options", [])
 
     row1_col1, row1_col2 = st.columns(2)
     with row1_col1:
@@ -373,31 +407,42 @@ def render_lifestyle_questions(T, lang):
             )
     with row1_col2:
         with st.container(border=True):
-            st.write(T.get("q_own_transport", "Q2. 現在、すでに所有している移動手段はありますか？（複数選択可）"))
+            st.write(T.get("q_own_transport", "Q2. 現在所有している移動手段はありますか？（複数選択可）"))
             c1, c2, c3 = st.columns(3)
             with c1:
-                own_car = st.checkbox("🚗 " + (T.get("own_car", "車")), key="q_step2_own_car")
-                own_moto = st.checkbox("🏍️ " + (T.get("own_moto", "バイク")), key="q_step2_own_moto")
+                own_car = st.checkbox("🚗 " + T.get("own_car", "Car"), key="q_step2_own_car")
+                own_moto = st.checkbox("🏍️ " + T.get("own_moto", "Motorcycle"), key="q_step2_own_moto")
             with c2:
-                own_ebike = st.checkbox("⚡ " + (T.get("own_ebike", "電動自転車")), key="q_step2_own_ebike")
-                own_none = st.checkbox("🚶 " + (T.get("own_none", "なし")), key="q_step2_own_none")
+                own_ebike = st.checkbox("⚡ " + T.get("own_ebike", "E-bike"), key="q_step2_own_ebike")
+                own_none = st.checkbox("🚶 " + T.get("own_none", "None"), key="q_step2_own_none")
             with c3:
-                own_bike = st.checkbox("🚲 " + (T.get("own_bike", "自転車")), key="q_step2_own_bike")
+                own_bike = st.checkbox("🚲 " + T.get("own_bike", "Bicycle"), key="q_step2_own_bike")
 
     row2_col1, row2_col2 = st.columns(2)
     with row2_col1:
         with st.container(border=True):
-            q2 = st.radio(T.get("q_work_style", "Q3. 現在の働き方はどれに一番近いですか？"), q2_opts, index=1, key="q_step2_work_style")
+            q2 = st.radio(
+                T.get("q_work_style", "Q3. 現在の働き方はどれに一番近いですか？"),
+                q2_opts,
+                index=1,
+                key="q_step2_work_style",
+            )
     with row2_col2:
-        st.empty()
+        with st.container(border=True):
+            q4 = st.radio(
+                T.get("q_social", "Q4. 人付き合いや、飲み会などの頻度はどのくらいですか？"),
+                q4_opts,
+                index=1,
+                key="q_step2_social",
+            )
 
-    row3_col1, row3_col2 = st.columns(2)
-    with row3_col1:
-        with st.container(border=True):
-            q4 = st.radio(T.get("q_social", "Q4. 人付き合いや、飲み会などの頻度はどのくらいですか？"), q4_opts, index=1, key="q_step2_social")
-    with row3_col2:
-        with st.container(border=True):
-            q5 = st.radio(T.get("q_leisure", "Q5. 休日の主な過ごし方（余暇のスタイル）はどれに一番近いですか？"), q5_opts, index=1, key="q_step2_leisure")
+    with st.container(border=True):
+        q5 = st.radio(
+            T.get("q_leisure", "Q5. 休日の主な過ごし方（余暇のスタイル）はどれに一番近いですか？"),
+            q5_opts,
+            index=1,
+            key="q_step2_leisure",
+        )
 
     lifestyle_data = {
         "car_necessity": q1a,
@@ -414,11 +459,22 @@ def render_lifestyle_questions(T, lang):
 # =====================================================================
 # Step 2b: 食事・外食（推定食費・補正ロジック用）
 # =====================================================================
-def render_food_questions(T, lang):
-    st.header(T.get("step_food_title", "2b. 🍽️ 食事・外食のスタイル"))
+def render_food_questions(T):
+    st.header(T.get("step_food_title", "2b. 🍽️ Food"))
     st.caption(T.get("step_food_intro", ""))
+    st.markdown(
+        """
+        <style>
+        [data-testid="stCheckbox"] {
+            margin-bottom: -0.2rem;
+        }
+        [data-testid="stCheckbox"] label p { margin: 0; line-height: 1.15; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    # --- Q2 自宅での食事の質（ベース単価係数は estimate_food_cost 側）---
+    # --- 自宅での食事の質（ベース単価係数は estimate_food_cost 側）---
     home_labels = [
         T.get("food_home_minimalist", ""),
         T.get("food_home_standard", ""),
@@ -427,21 +483,6 @@ def render_food_questions(T, lang):
     ]
     home_keys = ["minimalist", "standard", "health_conscious", "time_saving"]
 
-    with st.container(border=True):
-        st.markdown("**2.** " + T.get("food_q_home_title", ""))
-        st.write(T.get("food_q_home_body", ""))
-        home_idx = home_labels.index(
-            st.radio(
-                "home_meal_style",
-                home_labels,
-                index=1,
-                key="food_home_meal_style_radio",
-                label_visibility="collapsed",
-            )
-        )
-        home_meal_style = home_keys[home_idx]
-
-    # --- Q3 外食・デリバリー（QOL加算）---
     freq_labels = [
         T.get("food_freq_01", ""),
         T.get("food_freq_23", ""),
@@ -456,51 +497,56 @@ def render_food_questions(T, lang):
     ]
     tone_keys = ["utility", "casual", "experience"]
 
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
+    # Q1 左カラム / Q2 右カラム
+    col_q1, col_q2 = st.columns(2)
+    with col_q1:
         with st.container(border=True):
-            st.markdown("**3.** " + T.get("food_q_out_title", ""))
-            st.write(T.get("food_q_out_body", ""))
+            home_idx = home_labels.index(
+                st.radio(
+                    T.get("food_q1", ""),
+                    home_labels,
+                    index=1,
+                    key="food_home_meal_style_radio",
+                )
+            )
+            home_meal_style = home_keys[home_idx]
+    with col_q2:
+        with st.container(border=True):
             fi = freq_labels.index(
                 st.radio(
-                    "dining_out_frequency",
+                    T.get("food_q2", ""),
                     freq_labels,
                     index=0,
                     key="food_dining_freq_radio",
-                    label_visibility="collapsed",
                 )
             )
             dining_out_frequency = freq_keys[fi]
-    with col_f2:
+
+    row2_col1, row2_col2 = st.columns(2)
+    with row2_col1:
         with st.container(border=True):
-            st.markdown("**3.** " + T.get("food_q_tone_sub", ""))
             ti = tone_labels.index(
                 st.radio(
-                    "dining_out_tone",
+                    T.get("food_q3", ""),
                     tone_labels,
                     index=1,
                     key="food_dining_tone_radio",
-                    label_visibility="collapsed",
                 )
             )
             dining_out_tone = tone_keys[ti]
 
-    # --- Q4 嗜好品・特定支出 ---
-    with st.container(border=True):
-        st.markdown("**4.** " + T.get("food_q_optional_title", ""))
-        st.write(T.get("food_q_optional_body", ""))
-        c1, c2, c3 = st.columns(3)
-        with c1:
+    # --- 嗜好品・特定支出 ---
+    with row2_col2:
+        with st.container(border=True):
+            st.write(T.get("food_q4", ""))
             opt_alcohol = st.checkbox(
                 T.get("food_opt_alcohol", ""),
                 key="food_opt_alcohol",
             )
-        with c2:
             opt_supp = st.checkbox(
                 T.get("food_opt_supp", ""),
                 key="food_opt_supp",
             )
-        with c3:
             opt_diet = st.checkbox(
                 T.get("food_opt_diet", ""),
                 key="food_opt_diet",
@@ -522,30 +568,14 @@ def render_food_questions(T, lang):
 # Step 3: 価値観のLLM推論（心理テスト＆自由記述ハイブリッド）
 # =====================================================================
 def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None):
-    st.header(T.get("step3_title", "3. 🧠 価値観と熱量の分析"))
-    st.write(T.get("step3_desc", "熟練のライフプランナー兼心理学者として、あなたの深層価値観を抽出するための質問を用意しました。"))
+    st.header(T.get("step3_title", "3. 🧠 Values"))
+    st.markdown(T.get("step3_desc", ""))
 
-    # 1. 心理テスト的定型質問（学術的背景に基づくトレードオフ）
-    st.subheader("🧘 Value Discovery (1-3)")
+    st.subheader(T.get("step3_part1_sub", "🧘 Value Discovery — Part 1"))
 
-    q_time_opts = [
-        "A: 未経験のアクティビティや学習に没頭する" if lang == "ja" else "A: Immerse in new activity/learning",
-        "B: 親しい友人や家族と豪華な時間を過ごす" if lang == "ja" else "B: Spend quality time with loved ones",
-        "C: 身体を休め、健康ルーティンを整える" if lang == "ja" else "C: Rest and establish health routine",
-        "D: 将来のために全額を貯金し、家で過ごす" if lang == "ja" else "D: Save all and stay home"
-    ]
-    q_risk_opts = [
-        "A: スキルアップのための書籍や講座代" if lang == "ja" else "A: Books/Courses for skill-up",
-        "B: 趣味や移動にかかる費用" if lang == "ja" else "B: Hobbies and transportation",
-        "C: 健康維持のためのジムや食材代" if lang == "ja" else "C: Gym and healthy food",
-        "D: 将来の備えとしての積立" if lang == "ja" else "D: Savings for the future"
-    ]
-    q_live_opts = [
-        "A: 誰にも縛られず、自分のペースで動けている時" if lang == "ja" else "A: Moving at own pace, unbound",
-        "B: 新しいことを学び、能力が向上していると感じる時" if lang == "ja" else "B: Learning new things, improving",
-        "C: 誰かの役に立ち、感謝や交流がある時" if lang == "ja" else "C: Helping others, interacting",
-        "D: 身体が軽く、メンタルが安定している時" if lang == "ja" else "D: Body is light, mental is stable"
-    ]
+    q_time_opts = list(T.get("values_q_time_options", []))
+    q_risk_opts = list(T.get("values_q_risk_options", []))
+    q_live_opts = list(T.get("values_q_live_options", []))
     row1_col1, row1_col2 = st.columns(2)
     with row1_col1:
         with st.container(border=True):
@@ -575,6 +605,8 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
             )
     with row2_col2:
         st.empty()
+
+    st.subheader(T.get("step3_part2_sub", "🧘 Value Discovery — Part 2"))
 
     q_jelly_opts = [
         T.get("q_jelly_a", ""),
@@ -628,8 +660,7 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
             st.session_state[wk] = v
             st.session_state[vk] = v
 
-    # 🚀 価値観を分析して反映ボタン（心臓部）
-    st.write("---")
+    st.divider()
     col1, col2 = st.columns([1, 1])
     with col2:
         use_ai_for_values = st.toggle(
@@ -696,9 +727,8 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
                 _apply_weights_to_sliders(fallback)
                 st.info(T.get("analysis_manual_mode", "AIを使わず、回答内容から推定して反映しました。"))
 
-    # 3. 価値観の重みスライダーUI（AIの結果が反映されている）
-    st.write("---")
-    st.markdown(f"#### {T.get('w_subdir', '⚖️ 価値観の重み (1〜10)')}")
+    st.divider()
+    st.subheader(T.get("w_subdir", "⚖️ Value weights"))
     r1c1, r1c2, r1c3 = st.columns(3)
     with r1c1:
         w_health = st.slider(T.get("w_health", "健康"), 1, 10, st.session_state.w_health, key="val_health")
@@ -727,55 +757,67 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
 # Step 4: アイテム修正（Optional）
 # =====================================================================
 def render_item_review(T, lang):
-    st.header(T.get("step4_title", "4. ⚙️ アイテムの微調整 (Optional)"))
+    st.header(T.get("step4_title", "4. ⚙️ Items"))
 
     def _mark_manual(key_name: str) -> None:
         st.session_state[f"manual_{key_name}"] = True
 
-    with st.expander(T.get("item_review_expander", "AIが補正した選択肢のリストを確認・微調整する")):
-        st.info(T.get("item_review_info", "Step 2の定型質問に基づき、不要なものは優先度0に、所有済みの場合は初期費用が0に自動補正されています。"))
+    with st.expander(T.get("item_review_expander", "")):
+        st.info(T.get("item_review_info", ""))
 
-        # ユーザーが任意アイテムを追加できるフォーム
-        st.markdown("#### " + ("➕ アイテムを追加" if lang == "ja" else "➕ Add Custom Item"))
+        st.subheader(T.get("add_custom_item_title", ""))
         with st.form("add_custom_item_form", clear_on_submit=True):
             f1, f2, f3 = st.columns(3)
             with f1:
                 cat_options = list(CATEGORIES[lang].items())
                 cat_labels = [name for _, name in cat_options]
                 selected_cat_label = st.selectbox(
-                    "カテゴリ" if lang == "ja" else "Category",
+                    T.get("form_category", "Category"),
                     cat_labels,
                 )
             with f2:
-                item_name = st.text_input("アイテム名" if lang == "ja" else "Item Name")
+                item_name = st.text_input(T.get("form_item_name", ""))
             with f3:
-                priority_new = st.slider("優先度" if lang == "ja" else "Priority", 0, 10, 3)
+                priority_new = st.slider(T.get("form_priority", "Priority"), 0, 10, 3)
 
             c1, c2 = st.columns(2)
             with c1:
-                initial_cost_new = st.number_input("初期費用 $" if lang == "ja" else "Initial Cost $", min_value=0, value=0, step=50)
+                initial_cost_new = st.number_input(
+                    T.get("form_initial", ""),
+                    min_value=0,
+                    value=0,
+                    step=50,
+                )
             with c2:
-                monthly_cost_new = st.number_input("月額費用 $" if lang == "ja" else "Monthly Cost $", min_value=0, value=0, step=10)
+                monthly_cost_new = st.number_input(
+                    T.get("form_monthly", ""),
+                    min_value=0,
+                    value=0,
+                    step=10,
+                )
 
             v1, v2, v3, v4 = st.columns(4)
             with v1:
-                health_new = st.slider("健康" if lang == "ja" else "Health", -10, 10, 0)
+                health_new = st.slider(T.get("form_health", ""), -10, 10, 0)
             with v2:
-                conn_new = st.slider("つながり" if lang == "ja" else "Connections", -10, 10, 0)
+                conn_new = st.slider(T.get("form_connections", ""), -10, 10, 0)
             with v3:
-                free_new = st.slider("自由" if lang == "ja" else "Freedom", -10, 10, 0)
+                free_new = st.slider(T.get("form_freedom", ""), -10, 10, 0)
             with v4:
-                grow_new = st.slider("成長" if lang == "ja" else "Growth", -10, 10, 0)
+                grow_new = st.slider(T.get("form_growth", ""), -10, 10, 0)
 
-            submit_add = st.form_submit_button("追加する" if lang == "ja" else "Add Item", use_container_width=True)
+            submit_add = st.form_submit_button(
+                T.get("form_submit_add", "Add"),
+                use_container_width=True,
+            )
 
             if submit_add:
                 if not item_name.strip():
-                    st.warning("アイテム名を入力してください。" if lang == "ja" else "Please enter an item name.")
+                    st.warning(T.get("warn_item_name_required", ""))
                 else:
                     cat_key = next((k for k, v in CATEGORIES[lang].items() if v == selected_cat_label), None)
                     if cat_key is None:
-                        st.error("カテゴリの解決に失敗しました。" if lang == "ja" else "Failed to resolve category.")
+                        st.error(T.get("err_category_resolve", ""))
                     else:
                         new_row = {
                             "name_ja": item_name.strip() if lang == "ja" else item_name.strip(),
@@ -794,9 +836,11 @@ def render_item_review(T, lang):
                             [st.session_state.category_dfs[cat_key], pd.DataFrame([new_row])],
                             ignore_index=True,
                         )
-                        st.success("アイテムを追加しました。" if lang == "ja" else "Item added.")
+                        st.success(T.get("success_item_added", ""))
                         st.rerun()
 
+        st.divider()
+        st.subheader(T.get("item_list_subheader", ""))
         cat_items = list(CATEGORIES[lang].items())
         cat_tabs = st.tabs([cat_name for _, cat_name in cat_items])
 
@@ -833,9 +877,9 @@ def render_item_review(T, lang):
                         if is_mandatory and st.session_state.get(pri_key, 0) <= 0:
                             st.session_state[pri_key] = 1
                     with c1:
-                        lbl = f"{row['name']} (0=Exclude)" if lang == "en" else f"{row['name']} (優先度0=除外)"
+                        lbl = f"{row['name']} {T.get('item_slider_suffix', '')}"
                         if st.session_state[mand_key]:
-                            st.caption("✅ " + T.get("mandatory_label", "必須"))
+                            st.caption("✅ " + T.get("item_slider_caption_mandatory", ""))
                         st.slider(lbl, 0, 10, key=pri_key, on_change=_mark_manual, args=(pri_key,))
                     with c2:
                         st.number_input(T.get("lbl_mc", "月額 $"), min_value=0, key=mc_key, on_change=_mark_manual, args=(mc_key,))
@@ -855,32 +899,27 @@ def render_risk_and_results(
     financial_data=None,
 ):
     if not result or result.get("status") != "ok":
-        st.error(T.get("opt_fail", "最適化に失敗しました。予算が少なすぎるか、必須アイテムのコストが高すぎる可能性があります。"))
+        st.error(T.get("opt_fail", ""))
         return
 
     if result.get("best_effort_mandatory_relaxed"):
-        st.success(
-            "制約の中で、あなたに寄り添う最善プランを作成しました。"
-            if lang == "ja"
-            else "Built the best possible plan within your constraints."
-        )
+        st.success(T.get("best_effort_mandatory_ok", ""))
         st.warning(
-            (
-                f"必須指定が予算制約で満たせなかったため、ベストエフォートで再計算しました（必須 {result.get('relaxed_mandatory_count', 0)} 件中、未反映 {result.get('missed_mandatory_count', 0)} 件）。"
-                if lang == "ja"
-                else f"Hard-mandatory items were infeasible under budget, so best-effort relaxation was applied (missed {result.get('missed_mandatory_count', 0)} of {result.get('relaxed_mandatory_count', 0)} mandatory items)."
+            T.get("best_effort_mandatory_warn", "").format(
+                relaxed=int(result.get("relaxed_mandatory_count", 0)),
+                missed=int(result.get("missed_mandatory_count", 0)),
             )
         )
         missed_items = result.get("missed_mandatory_items", [])
         if missed_items:
-            st.markdown("**守れなかった必須アイテム**" if lang == "ja" else "**Mandatory items not satisfied**")
+            st.markdown(f"**{T.get('missed_mandatory_heading', '')}**")
             for item in missed_items:
                 name = item.get("name_ja") if lang == "ja" else item.get("name_en")
                 if not name:
                     name = item.get("name", item.get("id", ""))
                 st.markdown(f"- {name}")
     else:
-        st.success(T.get("opt_success", "最適化が完了しました！"))
+        st.success(T.get("opt_success", ""))
 
     if result.get("best_effort_zero_food_stages"):
         st.info(
@@ -900,7 +939,7 @@ def render_risk_and_results(
     # -----------------------------------------------------------------
     # 非AIの実行ダッシュボード（最適化結果の直後に表示）
     # -----------------------------------------------------------------
-    st.subheader("📌 実行ダッシュボード" if lang == "ja" else "📌 Execution Dashboard")
+    st.subheader(T.get("dash_exec_title", ""))
 
     selected = result.get("selected", [])
     monthly_budget = float((financial_data or {}).get("monthly_budget", 0) or 0)
@@ -920,136 +959,175 @@ def render_risk_and_results(
     tot_monthly_spend = float(result.get("total_monthly_cost", 0) or 0)
     # 最適化側: monthly_budget = tot_monthly_spend + actual_monthly（常に配分尽くし）
     alloc_sum = tot_monthly_spend + actual_monthly
+    initial_used = float(result.get("total_initial_cost", 0) or 0)
+    initial_left = max(initial_budget - initial_used, 0)
 
     if food_floor > 0:
         st.caption(
-            (
-                f"食費のミニマム（Minimalist）${int(food_floor):,}/月を必須費として控除後の可処分予算で最適化しています。"
-                if lang == "ja"
-                else f"Optimization uses disposable budget after subtracting the Minimalist food floor (${int(food_floor):,}/month)."
-            )
+            T.get("dash_food_floor_caption", "").format(floor=int(food_floor)),
         )
 
-    # 1) 使用可能金額と使用状況（月/初期）+ 貯金目標達成率
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric(
-        "月予算" if lang == "ja" else "Monthly Budget",
-        f"${int(monthly_budget):,}",
-        (
-            f"消費 ${int(tot_monthly_spend):,} + 貯蓄 ${int(actual_monthly):,} = ${int(alloc_sum):,}"
-            if lang == "ja"
-            else f"Spend ${int(tot_monthly_spend):,} + Save ${int(actual_monthly):,} = ${int(alloc_sum):,}"
-        ),
-    )
-    m2.metric(
-        "初期予算" if lang == "ja" else "Initial Budget",
-        f"${int(initial_budget):,}",
-        (f"使用 ${int(result.get('total_initial_cost', 0)):,}" if lang == "ja" else f"Used ${int(result.get('total_initial_cost', 0)):,}"),
-    )
-    m3.metric(
-        "月次貯蓄（余剰）" if lang == "ja" else "Monthly savings (surplus)",
-        f"${int(actual_monthly):,}",
-        (
-            f"可処分内の貯蓄枠（≠未使用）"
-            if lang == "ja"
-            else "Savings within budget (not “unused”)"
-        ),
-    )
-    m4.metric(
-        "初期予算残" if lang == "ja" else "Initial Remaining",
-        f"${int(max(initial_budget - float(result.get('total_initial_cost', 0)), 0)):,}",
-    )
-    m5.metric("貯金目標達成率" if lang == "ja" else "Savings Goal Rate", f"{monthly_rate_raw:.0%}")
-    if abs(alloc_sum - monthly_budget) > 0.51:
-        st.caption(
-            "※ 月次配分の合計と可処分上限に数円差がある場合は整数丸めの影響です。"
-            if lang == "ja"
-            else "※ Small mismatch vs. budget cap is usually integer rounding."
-        )
+    st.subheader(T.get("dash_section_overview_title", ""))
+    monthly_block = "📅 月予算" if lang == "ja" else "📅 Monthly budget"
+    initial_block = "🧾 初期費用" if lang == "ja" else "🧾 Initial cost"
+    savings_block = "💰 貯蓄" if lang == "ja" else "💰 Savings"
+    food_block = "🍽️ 食費" if lang == "ja" else "🍽️ Food"
 
-    if food_floor > 0 or food_stage1_cap > 0 or food_stage2_cap > 0:
-        f1, f2, f3 = st.columns(3)
-        f1.metric(
-            "食費ミニマム（固定）" if lang == "ja" else "Food Floor (Fixed)",
-            f"${int(food_floor):,}",
-        )
-        f2.metric(
-            "食費Stage1（希望水準到達）" if lang == "ja" else "Food Stage1 (to Survey Target)",
-            f"${int(food_stage1_used):,}",
-            (
-                f"上限 ${int(food_stage1_cap):,} に対して {food_stage1_used / food_stage1_cap:.0%}"
-                if food_stage1_cap > 0 and lang == "ja"
-                else None
-            ),
-        )
-        f3.metric(
-            "食費Stage2（贅沢アップグレード）" if lang == "ja" else "Food Stage2 (Luxury Upgrade)",
-            f"${int(food_stage2_used):,}",
-            (
-                f"上限 ${int(food_stage2_cap):,} に対して {food_stage2_used / food_stage2_cap:.0%}"
-                if food_stage2_cap > 0 and lang == "ja"
-                else None
-            ),
-        )
-        # 合計は下段に回さず、右側に上書き表示（分かりやすさ優先）
-        st.caption(
-            (
-                f"食費合計（固定+Stage1+Stage2）: ${int(food_total):,}/月"
-                if lang == "ja"
-                else f"Total Food Spend (Floor+Stage1+Stage2): ${int(food_total):,}/mo"
+    row_a1, row_a2 = st.columns(2)
+    with row_a1:
+        with st.container(border=True):
+            st.markdown(f"**{monthly_block}**")
+            m_left, m_right = st.columns(2)
+            with m_left:
+                st.metric(
+                    T.get("dash_metric_monthly_pool", ""),
+                    f"${int(monthly_budget):,}",
+                )
+            with m_right:
+                alloc_label = "配分合計" if lang == "ja" else "Allocated total"
+                st.metric(
+                    alloc_label,
+                    f"${int(alloc_sum):,}",
+                )
+            st.caption(
+                T.get("dash_metric_monthly_pool_help", "").format(
+                    spend=f"${int(tot_monthly_spend):,}",
+                    save=f"${int(actual_monthly):,}",
+                    total=f"${int(alloc_sum):,}",
+                )
             )
-        )
+            if abs(alloc_sum - monthly_budget) > 0.51:
+                st.caption(T.get("dash_rounding_note", ""))
+
+    with row_a2:
+        with st.container(border=True):
+            st.markdown(f"**{initial_block}**")
+            i_left, i_right = st.columns(2)
+            with i_left:
+                st.metric(
+                    T.get("dash_metric_initial_cap", ""),
+                    f"${int(initial_budget):,}",
+                )
+            with i_right:
+                st.metric(
+                    T.get("dash_metric_initial_left", ""),
+                    f"${int(initial_left):,}",
+                )
+            st.caption(
+                T.get("dash_metric_initial_used", "").format(
+                    used=f"${int(initial_used):,}",
+                )
+            )
+
+    row_b1, row_b2 = st.columns(2)
+    with row_b1:
+        with st.container(border=True):
+            st.markdown(f"**{savings_block}**")
+            s_left, s_right = st.columns(2)
+            with s_left:
+                st.metric(
+                    T.get("dash_metric_monthly_savings", ""),
+                    f"${int(actual_monthly):,}",
+                )
+            with s_right:
+                st.metric(
+                    T.get("dash_metric_savings_rate", ""),
+                    f"{monthly_rate_raw:.0%}",
+                )
+            st.caption(T.get("dash_metric_monthly_savings_help", ""))
+
+    with row_b2:
+        with st.container(border=True):
+            st.markdown(f"**{food_block}**")
+            f_left, f_right = st.columns(2)
+            with f_left:
+                st.metric(
+                    T.get("dash_cat_food", "Food"),
+                    f"${int(food_total):,}",
+                )
+            with f_right:
+                upgrade_label = "食のグレードアップ" if lang == "ja" else "Food upgrade"
+                st.metric(
+                    upgrade_label,
+                    f"${int(food_stage2_used):,}",
+                )
+            if lang == "ja":
+                summary = f"食費合計：固定 ${int(food_floor):,} + 通常食費 ${int(food_stage1_used):,} + {upgrade_label} ${int(food_stage2_used):,}"
+            else:
+                summary = f"Total food: Fixed ${int(food_floor):,} + Standard ${int(food_stage1_used):,} + {upgrade_label} ${int(food_stage2_used):,}"
+            st.caption(summary)
+
+    # AIライフコーチダッシュボード（予算配分サマリーとカテゴリ別内訳の間に挿入）
+    st.divider()
+    if not use_ai_for_summary:
+        st.caption(T.get("ai_summary_off", "AI summary is turned off."))
+    elif summary := get_result_summary(result, user_profile, weights, lang):
+        st.subheader(T.get("ai_dashboard", "💡 AI ライフコーチ ダッシュボード"))
+        lbl_theme = T.get("theme", "テーマ")
+        lbl_analysis = T.get("analysis", "分析")
+        lbl_blind_spot = T.get("blind_spot", "死角・リスク")
+        lbl_action = T.get("next_action", "次のアクション")
+
+        st.info(f"**{lbl_theme}:** {summary.get('concept', '')}")
+        st.write(f"**{lbl_analysis}:** {summary.get('analysis', '')}")
+        st.warning(f"**{lbl_blind_spot}:** {summary.get('blind_spot', '')}")
+        st.success(f"**{lbl_action}:** {summary.get('next_action', '')}")
+    else:
+        st.caption(T.get("ai_error_summary", "AIダッシュボードの生成に失敗しました。"))
 
     # 2) カテゴリごとの使用額/割合（月/初期）
     if selected:
+        ck = T.get("dash_col_category", "Category")
+        cm = T.get("dash_col_monthly", "Monthly")
+        cmp_ = T.get("dash_col_monthly_pct", "Monthly %")
+        ci = T.get("dash_col_initial", "Initial")
+        cip = T.get("dash_col_initial_pct", "Initial %")
         rows = []
         for cat_key, cat_label in CATEGORIES[lang].items():
-            cat_items = [it for it in selected if it.get("category") == cat_key]
-            if not cat_items:
+            cat_items_sel = [it for it in selected if it.get("category") == cat_key]
+            if not cat_items_sel:
                 continue
-            cat_mc = sum(float(it.get("monthly_cost", 0) or 0) for it in cat_items)
-            cat_ic = sum(float(it.get("initial_cost", 0) or 0) for it in cat_items)
+            cat_mc = sum(float(it.get("monthly_cost", 0) or 0) for it in cat_items_sel)
+            cat_ic = sum(float(it.get("initial_cost", 0) or 0) for it in cat_items_sel)
             rows.append(
                 {
-                    "Category" if lang == "en" else "カテゴリ": cat_label,
-                    "Monthly $" if lang == "en" else "月額 $": int(cat_mc),
-                    "Monthly %" if lang == "en" else "月額 %": (cat_mc / monthly_mix_base * 100) if monthly_mix_base > 0 else 0,
-                    "Initial $" if lang == "en" else "初期 $": int(cat_ic),
-                    "Initial %" if lang == "en" else "初期 %": (cat_ic / initial_budget * 100) if initial_budget > 0 else 0,
+                    ck: cat_label,
+                    cm: int(cat_mc),
+                    cmp_: (cat_mc / monthly_mix_base * 100) if monthly_mix_base > 0 else 0,
+                    ci: int(cat_ic),
+                    cip: (cat_ic / initial_budget * 100) if initial_budget > 0 else 0,
                 }
             )
-        # 貯金をカテゴリとして追加（月額のみ）
         rows.append(
             {
-                "Category" if lang == "en" else "カテゴリ": ("Savings" if lang == "en" else "貯金"),
-                "Monthly $" if lang == "en" else "月額 $": int(actual_monthly),
-                "Monthly %" if lang == "en" else "月額 %": (actual_monthly / monthly_mix_base * 100) if monthly_mix_base > 0 else 0,
-                "Initial $" if lang == "en" else "初期 $": 0,
-                "Initial %" if lang == "en" else "初期 %": 0.0,
+                ck: T.get("dash_cat_savings", ""),
+                cm: int(actual_monthly),
+                cmp_: (actual_monthly / monthly_mix_base * 100) if monthly_mix_base > 0 else 0,
+                ci: 0,
+                cip: 0.0,
             }
         )
-        # 食費（固定+可変）をカテゴリとして追加（月額のみ）
         if food_total > 0:
             rows.append(
                 {
-                    "Category" if lang == "en" else "カテゴリ": ("Food" if lang == "en" else "食費"),
-                    "Monthly $" if lang == "en" else "月額 $": int(food_total),
-                    "Monthly %" if lang == "en" else "月額 %": (food_total / monthly_mix_base * 100) if monthly_mix_base > 0 else 0,
-                    "Initial $" if lang == "en" else "初期 $": 0,
-                    "Initial %" if lang == "en" else "初期 %": 0.0,
+                    ck: T.get("dash_cat_food", ""),
+                    cm: int(food_total),
+                    cmp_: (food_total / monthly_mix_base * 100) if monthly_mix_base > 0 else 0,
+                    ci: 0,
+                    cip: 0.0,
                 }
             )
         if rows:
             df_cat = pd.DataFrame(rows)
-            st.markdown("#### 2) " + ("Category Spend Mix" if lang == "en" else "カテゴリ別の使用額/割合"))
+            st.subheader(T.get("dash_section_2_title", ""))
             st.dataframe(df_cat, use_container_width=True, hide_index=True)
-            cat_col = "Category" if lang == "en" else "カテゴリ"
-            monthly_pct_col = "Monthly %" if lang == "en" else "月額 %"
-            initial_pct_col = "Initial %" if lang == "en" else "初期 %"
+            cat_col = ck
+            monthly_pct_col = cmp_
+            initial_pct_col = cip
 
             p1, p2 = st.columns(2)
             with p1:
-                st.caption("Monthly mix (%)" if lang == "en" else "月額のカテゴリ構成比(%)")
+                st.caption(T.get("dash_chart_monthly_mix", ""))
                 _m = df_cat.sort_values(monthly_pct_col, ascending=False)
                 fig_m = px.bar(
                     _m,
@@ -1064,7 +1142,7 @@ def render_risk_and_results(
                 fig_m.update_layout(margin=dict(l=10, r=10, t=10, b=10), coloraxis_showscale=False)
                 st.plotly_chart(fig_m, width="stretch", key="exec_dash_cat_monthly_pct")
             with p2:
-                st.caption("Initial mix (%)" if lang == "en" else "初期費用のカテゴリ構成比(%)")
+                st.caption(T.get("dash_chart_initial_mix", ""))
                 _i = df_cat.sort_values(initial_pct_col, ascending=False)
                 fig_i = px.bar(
                     _i,
@@ -1079,8 +1157,7 @@ def render_risk_and_results(
                 fig_i.update_layout(margin=dict(l=10, r=10, t=10, b=10), coloraxis_showscale=False)
                 st.plotly_chart(fig_i, width="stretch", key="exec_dash_cat_initial_pct")
 
-    # 3) 貯蓄（期間合計）・貯蓄割合
-    # 4) 目標貯蓄額までどれくらいか（期間合計）
+    st.subheader(T.get("dash_section_savings_title", ""))
     c1, c2, c3, c4 = st.columns(4)
     target_total = float((financial_data or {}).get("target_total_savings", 0) or 0)
     if target_total <= 0:
@@ -1089,50 +1166,49 @@ def render_risk_and_results(
     total_gap = max(target_total - projected_total, 0)
     total_progress_ratio = min(projected_total / target_total, 1.0) if target_total > 0 else 1.0
     c1.metric(
-        "目標貯金総額 / Target Savings Total",
+        T.get("dash_metric_target_total", ""),
         f"${int(target_total):,}",
         f"{period_years}y",
     )
     over_total = max(projected_total - target_total, 0)
     c2.metric(
-        "見込み貯金総額 / Projected Savings Total",
+        T.get("dash_metric_projected_total", ""),
         f"${int(projected_total):,}",
     )
     c3.metric(
-        "達成率 / Achievement Rate",
+        T.get("dash_metric_achievement", ""),
         f"{(projected_total / target_total if target_total > 0 else 1.0):.1%}",
     )
-    c4.metric("目標まで残り / Remaining to Goal", f"${int(total_gap):,}")
+    c4.metric(
+        T.get("dash_metric_remaining_goal", ""),
+        f"${int(total_gap):,}",
+    )
     st.progress(total_progress_ratio)
     st.caption(
-        (f"Goal progress over {period_years} years: {total_progress_ratio:.0%}" if lang == "en" else f"{period_years}年での目標進捗: {total_progress_ratio:.0%}")
+        T.get("dash_caption_goal_progress", "").format(
+            years=period_years,
+            pct=total_progress_ratio,
+        )
     )
     if over_total > 0:
         st.caption(
-            (
-                f"Projected surplus over goal: ${over_total:,.0f}"
-                if lang == "en"
-                else f"目標超過見込み: ${over_total:,.0f}"
-            )
+            T.get("dash_caption_surplus", "").format(amt=over_total),
         )
     st.caption(
-        (
-            f"Target total is taken directly from your input. ({period_years} years)"
-            if lang == "en"
-            else f"目標総額は入力値をそのまま使用しています。（{period_years}年）"
-        )
+        T.get("dash_caption_target_source", "").format(years=period_years),
     )
 
     achieved_amount = min(projected_total, target_total) if target_total > 0 else projected_total
     remaining_amount = max(target_total - achieved_amount, 0)
     over_amount = max(projected_total - target_total, 0) if target_total > 0 else 0
 
+    bar_y = T.get("dash_chart_bar_goal", "")
     fig_s = go.Figure()
     fig_s.add_trace(
         go.Bar(
-            y=["Savings Goal" if lang == "en" else "貯蓄目標"],
+            y=[bar_y],
             x=[achieved_amount],
-            name="Achieved" if lang == "en" else "達成分",
+            name=T.get("dash_chart_achieved", ""),
             legendrank=2,
             orientation="h",
             marker_color="#3b82f6",
@@ -1142,9 +1218,9 @@ def render_risk_and_results(
     )
     fig_s.add_trace(
         go.Bar(
-            y=["Savings Goal" if lang == "en" else "貯蓄目標"],
+            y=[bar_y],
             x=[remaining_amount],
-            name="Remaining" if lang == "en" else "残り",
+            name=T.get("dash_chart_remaining", ""),
             legendrank=1,
             orientation="h",
             marker_color="#f59e0b",
@@ -1155,9 +1231,9 @@ def render_risk_and_results(
     if over_amount > 0:
         fig_s.add_trace(
             go.Bar(
-                y=["Savings Goal" if lang == "en" else "貯蓄目標"],
+                y=[bar_y],
                 x=[over_amount],
-                name="Over" if lang == "en" else "超過分",
+                name=T.get("dash_chart_over", ""),
                 legendrank=3,
                 orientation="h",
                 marker_color="#10b981",
@@ -1175,19 +1251,20 @@ def render_risk_and_results(
         legend=dict(traceorder="normal"),
     )
     st.plotly_chart(fig_s, width="stretch", key="exec_dash_savings_actual_vs_target")
-    st.caption(
-        f"{'目標まで' if lang == 'ja' else 'Gap to goal'}: ${total_gap:,.0f}"
-    )
+    st.caption(T.get("dash_gap_caption", "").format(gap=total_gap))
 
-    # 5) 今回アイテムで満たされる価値観
     if selected:
         value_axes = ["health", "connections", "freedom", "growth", "food"]
+        value_col = T.get("dash_col_value", "")
+        score_col = T.get("dash_col_score", "")
+        fill_col = T.get("dash_col_fulfillment", "")
+        weighted_col = T.get("dash_col_weighted", "")
         axis_labels = {
-            "health": "健康" if lang == "ja" else "Health",
-            "connections": "つながり" if lang == "ja" else "Connections",
-            "freedom": "自由" if lang == "ja" else "Freedom",
-            "growth": "成長" if lang == "ja" else "Growth",
-            "food": "食" if lang == "ja" else "Food",
+            "health": T.get("form_health", ""),
+            "connections": T.get("form_connections", ""),
+            "freedom": T.get("form_freedom", ""),
+            "growth": T.get("form_growth", ""),
+            "food": T.get("val_axis_food", ""),
         }
         n_sel = max(len(selected), 1)
         value_rows = []
@@ -1202,16 +1279,14 @@ def render_risk_and_results(
             weighted = raw_score * float(weights.get(axis, 5) or 5)
             value_rows.append(
                 {
-                    "Value" if lang == "en" else "価値観": axis_labels[axis],
-                    "Score" if lang == "en" else "スコア": round(raw_score, 1),
-                    "Fulfillment %" if lang == "en" else "充足率 %": round(max(0, normalized), 1),
-                    "Weighted" if lang == "en" else "重み反映値": round(weighted, 1),
+                    value_col: axis_labels[axis],
+                    score_col: round(raw_score, 1),
+                    fill_col: round(max(0, normalized), 1),
+                    weighted_col: round(weighted, 1),
                 }
             )
         df_value = pd.DataFrame(value_rows)
-        st.markdown("#### 5) " + ("Values Fulfilled by Selected Items" if lang == "en" else "今回アイテムで満たされる価値観"))
-        value_col = "Value" if lang == "en" else "価値観"
-        fill_col = "Fulfillment %" if lang == "en" else "充足率 %"
+        st.subheader(T.get("dash_section_values_title", ""))
 
         # 追加指標: 価値観重みと選択アイテムの一致度
         # 計算: 各軸の「重みシェア」と「実現シェア（負値は0扱い）」のL1距離から一致度へ変換
@@ -1234,15 +1309,11 @@ def render_risk_and_results(
             match_ratio = 0.0
 
         st.metric(
-            "価値観マッチ度" if lang == "ja" else "Value Match Score",
+            T.get("dash_value_match", ""),
             f"{match_ratio:.1%}",
-            help=(
-                "重みシェアと実現シェアの距離で算出（1 - 0.5×L1距離）。100%に近いほど、重みと選択の配分が近い。"
-                if lang == "ja"
-                else "Computed by distance between preference-share and achieved-share (1 - 0.5×L1 distance). Closer to 100% means better alignment."
-            ),
+            help=T.get("dash_value_match_help", ""),
         )
-        st.caption("Value fulfillment by selected items" if lang == "en" else "選択アイテムによる価値観の充足率")
+        st.caption(T.get("dash_values_chart_caption", ""))
         _v = df_value.sort_values(fill_col, ascending=False)
         fig_v = px.bar(
             _v,
@@ -1257,8 +1328,8 @@ def render_risk_and_results(
         fig_v.update_layout(margin=dict(l=10, r=10, t=10, b=10), coloraxis_showscale=False)
         st.plotly_chart(fig_v, width="stretch", key="exec_dash_value_fulfillment")
 
-    # 選ばれたアイテム一覧
-    st.write("### " + T.get("sel_items", "選択されたライフスタイルアイテム"))
+    st.divider()
+    st.subheader(T.get("sel_items", ""))
     selected = result["selected"]
     if selected:
         cat_items = list(CATEGORIES[lang].items())
@@ -1267,11 +1338,17 @@ def render_risk_and_results(
             with tab:
                 by_cat = [it for it in selected if it.get("category") == cat_key]
                 if not by_cat:
-                    st.caption("該当アイテムなし" if lang == "ja" else "No selected items in this category.")
+                    st.caption(T.get("dash_no_items_in_cat", ""))
                     continue
 
+                ic_sum = int(sum(float(it.get("initial_cost", 0) or 0) for it in by_cat))
+                mc_sum = int(sum(float(it.get("monthly_cost", 0) or 0) for it in by_cat))
                 st.caption(
-                    f"{len(by_cat)} item(s) / Initial ${int(sum(float(it.get('initial_cost', 0) or 0) for it in by_cat)):,} / Monthly ${int(sum(float(it.get('monthly_cost', 0) or 0) for it in by_cat)):,}"
+                    T.get("dash_item_summary", "").format(
+                        n=len(by_cat),
+                        ic=ic_sum,
+                        mc=mc_sum,
+                    )
                 )
                 for item in by_cat:
                     orig = next((i for i in DEFAULT_ITEMS if f"{i['category']}_{i.get('priority',999)}" == item["id"]), None)
@@ -1286,26 +1363,8 @@ def render_risk_and_results(
 
                     st.markdown(
                         f"- **{name}**  \n"
-                        f"  {'初期' if lang == 'ja' else 'Initial'}: `${int(item.get('initial_cost', 0)):,}` / "
-                        f"{'月額' if lang == 'ja' else 'Monthly'}: `${int(item.get('monthly_cost', 0)):,}`"
+                        f"  {T.get('dash_item_initial', '')}: `${int(item.get('initial_cost', 0)):,}` / "
+                        f"{T.get('dash_item_monthly', '')}: `${int(item.get('monthly_cost', 0)):,}`"
                     )
     else:
         st.write(T.get("none", "なし"))
-
-    # AIライフコーチダッシュボード
-    st.divider()
-    if not use_ai_for_summary:
-        st.caption(T.get("ai_summary_off", "AI summary is turned off."))
-    elif summary := get_result_summary(result, user_profile, weights, lang):
-        st.subheader(T.get("ai_dashboard", "💡 AI ライフコーチ ダッシュボード"))
-        lbl_theme = T.get("theme", "テーマ")
-        lbl_analysis = T.get("analysis", "分析")
-        lbl_blind_spot = T.get("blind_spot", "死角・リスク")
-        lbl_action = T.get("next_action", "次のアクション")
-
-        st.info(f"**{lbl_theme}:** {summary.get('concept', '')}")
-        st.write(f"**{lbl_analysis}:** {summary.get('analysis', '')}")
-        st.warning(f"**{lbl_blind_spot}:** {summary.get('blind_spot', '')}")
-        st.success(f"**{lbl_action}:** {summary.get('next_action', '')}")
-    else:
-        st.caption(T.get("ai_error_summary", "AIダッシュボードの生成に失敗しました。"))
