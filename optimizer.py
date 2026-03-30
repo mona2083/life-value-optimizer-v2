@@ -45,7 +45,7 @@ def _calc_priority_weights(candidates: list[dict]) -> list[float]:
     return weights
 
 def _base_utility(item: dict, weights: dict) -> int:
-    # 【修正】すべてのスコアに +10 を加算し、マイナス効用による無条件除外バグを防止
+    # Fix: Prevent unconditional exclusion bugs due to negative utilities by adding +10 to all scores
     fw = int(weights.get("food", 5))
     fr = food_related_score(item)
     food_term = fw * (fr + 10) * 40
@@ -135,13 +135,13 @@ def run_optimizer(
 
     total_max_utility = sum(utilities)
     
-    # 【修正】割り算をfloatで行い、重みが0より大きければ必ず係数が1以上になるように安全措置を追加
+    # Fix: Safely use float division, ensuring multiplier is at least >= 1 when weight > 0
     _raw_savings_coefficient = (total_max_utility * weights["savings"]) / (10 * max(monthly_budget, 1))
     savings_coefficient = max(1 if weights["savings"] > 0 else 0, int(_raw_savings_coefficient))
     
-    # 貯蓄の効用は「目標達成分」だけを強く評価する。
-    # 目標超過分まで同じ係数で伸びると、余剰があっても Stage2（贅沢枠）より
-    # 「さらに貯める」方向に目的関数が寄り、Stage2 が常に 0 になりやすい。
+    # Utility of savings heavily focuses only on the target achievement part.
+    # If overachieved parts linearly scale the same way, the objective function
+    # skews towards 'save more' over Stage2 (Upgrade), resulting in Stage2 often being 0.
     if target_monthly_savings > 0:
         ts = model.NewIntVar(0, monthly_budget, "target_monthly_savings_fixed")
         model.Add(ts == target_monthly_savings)
@@ -153,12 +153,12 @@ def run_optimizer(
         savings_value = model.NewIntVar(0, int(monthly_budget * savings_coefficient) + 1, "savings_value")
         model.Add(savings_value == actual_savings_var * savings_coefficient)
 
-    # ===== 食の2段階モデルを目的関数に反映 =====
-    # Stage1: C_min -> C_survey（“希望水準まで到達”を強く促す）
-    # Stage2: C_survey -> C_max（“食の重み”に比例して贅沢アップグレード）
+    # ===== Reflect 2-stage food model in the objective function =====
+    # Stage1: C_min -> C_survey (Strongly encourage reaching the requested standard)
+    # Stage2: C_survey -> C_max (Luxury upgrade proportional to 'food weight')
     food_weight = max(int(weights.get("food", 5) or 0), 1)
-    # food_weight(1-10)に応じてStage1の強制度を可変化
-    # 低ウェイト: できれば埋める / 高ウェイト: ほぼ最優先で埋める
+    # Vary strictness of Stage1 realization based on food_weight(1-10)
+    # Low weight: Fulfill if possible / High weight: Fulfill with top priority
     _fw_norm = (food_weight - 1) / 9.0  # 0.0 .. 1.0
     FOOD_STAGE1_VALUE_PER_DOLLAR = int(80 + 560 * _fw_norm)  # 80 .. 640
     FOOD_STAGE2_VALUE_PER_DOLLAR_BASE = 32  # Stage2は食の重みに比例
@@ -180,8 +180,8 @@ def run_optimizer(
         == food_stage2_var * food_weight * FOOD_STAGE2_VALUE_PER_DOLLAR_BASE
     )
 
-    # Stage1（希望水準まで）は最優先で満たす。
-    # 予算制約で満たせない場合のみ不足を許容し、不足額に強いペナルティを課す。
+    # Fulfill Stage1 (up to requested standard) with absolute priority.
+    # Allow deficiency only if restricted by budget constraint, penalizing the unfulfilled amount.
     food_stage1_deficit_var = model.NewIntVar(0, food_stage1_max, "food_stage1_deficit")
     model.Add(food_stage1_deficit_var == food_stage1_max - food_stage1_var)
     FOOD_STAGE1_DEFICIT_PENALTY = int(5000 + 95000 * _fw_norm)  # 5,000 .. 100,000

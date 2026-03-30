@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-# ローカルモジュールのインポート
+# Local module imports
 import ui
 from optimizer import run_optimizer
 from lang import LANG
@@ -9,23 +9,23 @@ from default_items import CATEGORIES, CATEGORY_CONSTRAINTS
 from risk_cost import calculate_risk_costs
 
 # =====================================================================
-# 初期設定・状態管理
+# Initialization and State Management
 # =====================================================================
 st.set_page_config(page_title="Life-Value Optimizer", page_icon="⚖️", layout="wide")
 
 if "lang" not in st.session_state:
-    st.session_state.lang = "ja"
+    st.session_state.lang = "en"
 
-# 翻訳辞書の取得
+# Get translation dictionary
 lang = st.session_state.lang
 T = LANG[lang]
 
-# カテゴリごとのDataFrame初期化（セッションステートで保持）
+# Initialize DataFrame for each category (stored in session state)
 if "category_dfs" not in st.session_state:
     st.session_state.category_dfs = ui.init_category_dfs()
 
 # =====================================================================
-# サイドバー（言語設定・リセット）
+# Sidebar (Language settings and reset)
 # =====================================================================
 with st.sidebar:
     st.header(f"⚙️ {T.get('sidebar_title', 'Settings')}")
