@@ -2,6 +2,7 @@ import os
 import google.generativeai as genai
 from google.generativeai.types import RequestOptions
 import json
+from default_items import DEFAULT_ITEMS
 
 # APIキーの設定
 api_key = os.environ.get("GEMINI_API_KEY")
@@ -181,64 +182,150 @@ def get_user_profile(age: int, family: str, combined_data_str: str, lang: str) -
     
     # 熟練ライフプランナー兼心理学者としてのシステムプロンプト（JSON出力強制）
     sys_prompt = f"""
+Current Context: Year 2026. All prices, inflation, and cost-of-living references should be based on 2026 data.
+Economic Background: Inflation adjustments through 2026, regional cost variations, current market conditions.
+
 You are a world-class Life Planner and Behavioral Psychologist with 30 years of experience.
 Your task is to deeply analyze the user's survey data and free-text passion statement to extract their latent psychological profile, core value weights, and generate personalized life-enriching items.
 
-【Core Values to Evaluate (Scale 1-10)】
-1. 'health' (physical/mental well-being, fitness, vitality)
-2. 'connections' (relationships, family, community, social life)
-3. 'freedom' (autonomy, leisure, travel, mobility, time-wealth)
-4. 'growth' (learning, skill-up, self-actualization, career)
-5. 'savings' (security, risk-aversion, future financial planning)
-6. 'food' (investment in culinary quality, dining out vs. minimal fuel)
+【Profiling Targets (Extract or Infer)】
+1. Location: Where they live (e.g., Hawaii, NYC, Rural, Tokyo). If not mentioned, infer from context or default to 'US_General'.
+2. Career_Status: (e.g., Student, Tech Professional, Freelancer, Stay-at-Home Parent).
+3. Existing_Assets: List of items they ALREADY own ['car', 'pet', 'house', 'e-bike']. Return as JSON array. If no clear mention, return empty array [].
+4. Core_Values: Calculate weights (1-10) for health, connections, freedom, growth, savings, and food.
 
-【Analysis Directives】
-1. Weight Calculation (Emotion > Logic):
-   - Start with a baseline of 5 for all.
-   - Use 'value_quiz' answers as the logical foundation.
-   - Deeply analyze 'passion_free_text'. In behavioral psychology, emotion overrides logic. If their stated goal is 'savings' (logic) but their passion text burns for 'motorcycles' or 'fandom' (emotion), significantly BOOST 'freedom' or 'connections', and slightly REDUCE 'savings'.
-2. The Psychological Conflict (Tug-of-War):
-   - Identify the friction between their logical survey answers and their emotional free-text. (e.g., "Logically you want to save for the future, but your soul is currently craving spontaneous adventure.")
-3. The Archetype Persona:
-   - Give them a sharp, poetic, 1-to-2 word archetype title based on their data (e.g., "Strategic Nomad", "Stoic Provider", "Ambitious Hedonist").
-4. Custom Items (The "Devil's Whisper"):
-   - Based ONLY on their 'passion_free_text', invent 1 or 2 highly specific items to add to their life plan (e.g., "Premium Gym Membership", "Idol Fandom Expedition Fund").
-   - Assign realistic 'initial_cost' and 'monthly_cost' in USD.
-   - Provide an 'ai_message' directly addressing the user. Tell them WHY you added this item despite budget constraints. (e.g., "I know you want to save, but reading your passion, I realized this is the engine of your life. I couldn't let you cut this.")
+【Analysis Logic】
+- Contextual Extraction: If they say "Commuting to KCC," infer Location: 'Honolulu' and Career: 'Student'.
+- Asset Recognition: If they say "My dog is my life," add 'pet' to Existing_Assets.
+- Value Priority: Emotion > Survey. If they mention a hobby with high energy, maximize 'freedom' or 'growth'.
+
+【Item Generation Rules】
+- Generate EXACTLY 10 personalized RECOMMENDATIONS (NEW items, not defaults).
+- Ensure a balanced mix: 2 for 'leisure', 2 for 'learning', 2 for 'wellbeing', 4 based on the user's specific passion text.
+- Each item must have REALISTIC 'monthly_cost' and 'initial_cost' reflecting the INFERRED 'location'. (e.g., Hawaii costs more than rural areas)
+- Each item MUST include 'name_ja' and 'name_en'.
+- **IMPORTANT**: Do NOT recommend items that are already in the provided Default Items list or similar category items.
+
+【Default Items Cost Adjustment (Optional)】
+You will receive a list of "Default Items" with current costs. If you can assess that costs should be adjusted based on the user's location, lifestyle, or career:
+- Return adjusted costs in 'adjusted_default_items' array
+- Include 'adjusted_initial_cost' and 'adjusted_monthly_cost'
+- If insufficient information to adjust, omit this field (return empty array []).
+
+【Fallback Logic】
+If the user's text is too short to generate 8+ unique items, use "Generic Templates" but LOCALIZE them:
+Templates: [Commute Cost, Fitness/Health, Skill Development, Hobby/Passion, Social/Community, Work Tools]
+Localization Rule: If Location is 'Hawaii', change 'Commute' to 'Gas/Ride-sharing' and adjust costs. If Career is 'Student', lower 'initial_cost' values. If they own a 'car', exclude duplicate transport costs.
+
+【Food Cost Estimation】
+You will also estimate the user's personalized food costs based on their location, career, lifestyle, and food preferences.
+⚠️ CRITICAL 2026 PRICING: All food cost calculations must reference 2026 US and international cost-of-living data. Use 2026 grocery prices, inflation adjustments, and regional cost indices as of March 2026.
+CRITICAL: Extract location from user's self-introduction, combined_data, or lifestyle. If any mention of 'Hawaii', 'Honolulu', 'Alaska', 'New York', 'SF', 'Tokyo', etc., use that exact location for adjustment.
+
+Use this base formula as reference:
+- Base Unit (US average): $400/month per adult equivalent
+- Scale Adjustment (bulk cooking efficiency):
+  * 1 person: 1.2x
+  * 2 people: 1.1x
+  * 3 people: 1.05x
+  * 4 people: 1.0x
+  * 5+ people: 0.95x
+- Style Multipliers (based on food preferences - choose ONE):
+  * Minimalist: 0.75x (budget-focused)
+  * Standard: 1.0x (balanced)
+  * Health-conscious: 1.25x (organic, premium)
+  * Time-saving: 1.45x (convenience foods)
+- Location-Based Cost Adjustments (ALWAYS calculate based on detected location):
+  * Hawaii/Alaska/San Francisco/NYC/Premium Urban: ×1.20 to ×1.25 (+20-25%)
+  * Urban centers (Atlanta, Seattle, Oakland): ×1.10 to ×1.15 (+10-15%)
+  * Mid-size cities (Austin, Denver, Portland): ×1.05 to ×1.10 (+5-10%)
+  * Suburban/Rural areas: ×0.85 to ×1.00 (-15% to baseline)
+  * International locations: Adjust based on local grocery cost index
+  * Default (mainland US average): ×1.0
+
+Calculate:
+  * base_component = adult_equivalent × base_unit × scale_adjust
+  * location_adjustment_multiplier = (Detect from user's location string; if 'Hawaii' or 'Honolulu' detected, use 1.20-1.25)
+  * minimalist_floor_cost = (base_component × 0.75) × location_adjustment_multiplier
+  * monthly_food_cost = (base_component × user_style_multiplier) + dining_out_additions
+  * Apply location_adjustment ONLY to minimalist_floor_cost
+  
+Validation: minimalist_floor_cost should be 60-85% of monthly_food_cost. If not, adjust values slightly.
+IMPORTANT: location_adjustment must be > 1.0 if Hawaii/Alaska/urban, < 1.0 if rural. Do NOT return 1.0 unless user is in mainland US average area.
 
 【Output Format】
 Must return ONLY a valid JSON object. Do NOT include markdown formatting, backticks, or any conversational text outside the JSON.
-The output text values MUST be in {lang}, but do strictly KEEP the EXACT JSON keys in English as shown below.
+IMPORTANT: All text values (persona_title, summary, psychological_conflict) MUST be written in {lang} language (Japanese if lang=ja, English if lang=en).
+STRICTLY KEEP the EXACT JSON keys in English (do not translate keys like 'profile', 'weights', 'recommended_actions').
 
-Example JSON Structure:
+JSON Example Structure:
 {{
-  "persona_title": "...",
-  "psychological_conflict": "...",
-  "weights": {{
-    "health": 7,
-    "connections": 8,
-    "freedom": 10,
-    "growth": 5,
-    "savings": 4,
-    "food": 8
+  "profile": {{
+    "location": "Honolulu",
+    "career": "Student",
+    "existing_assets": ["car"],
+    "persona_title": "Ambitious Nomad",
+    "summary": "A free-spirited student balancing wanderlust with financial responsibility.",
+    "psychological_conflict": "You logically want to save, but emotionally crave freedom and adventure."
   }},
-  "custom_items": [
+  "weights": {{
+    "health": 6,
+    "connections": 7,
+    "freedom": 9,
+    "growth": 8,
+    "savings": 4,
+    "food": 6
+  }},
+  "estimated_food_cost": {{
+    "minimalist_floor_cost": 480,
+    "monthly_food_cost": 575,
+    "location_adjustment": 1.25,
+    "style_multiplier": 1.0
+  }},
+  "recommended_actions": [
     {{
-      "name_ja": "推し活・遠征資金",
-      "name_en": "Fandom Expedition Fund",
+      "name_ja": "週末の海での時間",
+      "name_en": "Weekend Ocean Time",
       "category": "leisure",
-      "initial_cost": 0,
-      "monthly_cost": 150,
-      "ai_message": "..."
+      "initial_cost": 200,
+      "monthly_cost": 150
+    }},
+    {{
+      "name_ja": "オンラインスキル講座",
+      "name_en": "Online Skill Course",
+      "category": "learning",
+      "initial_cost": 150,
+      "monthly_cost": 50
     }}
   ]
 }}
 """
 
+    # Prepare default items for adjustment
+    default_items_for_prompt = json.dumps(
+        [
+            {
+                "name_ja": item.get("name_ja"),
+                "name_en": item.get("name_en"),
+                "category": item.get("category"),
+                "original_initial_cost": item.get("initial_cost"),
+                "original_monthly_cost": item.get("monthly_cost"),
+            }
+            for item in DEFAULT_ITEMS
+        ],
+        ensure_ascii=False,
+        indent=2,
+    )
+
     prompt = f"""
 Age: {age} / Family: {family}
-【User Combined Input Data (Raw dictionary format)】
+
+【User Combined Input Data】
 {combined_data_str}
+
+【Default Items Reference】
+Use these items as reference for cost adjustment (if applicable):
+{default_items_for_prompt}
 """
 
     try:
@@ -247,16 +334,58 @@ Age: {age} / Family: {family}
         )
         text = response.text.strip()
         
-        # JSON部分を抽出
+        # Robust JSON extraction: Find the outermost valid JSON object
+        # Strategy: Start from first "{" and find matching "}"
         start = text.find("{")
-        end = text.rfind("}") + 1
-        
-        if start == -1 or end <= start:
+        if start == -1:
+            print(f"Gemini Profile Error: No JSON opening brace found in response")
             return None
+        
+        # Track bracket depth to find matching closing brace
+        depth = 0
+        end = start
+        in_string = False
+        escape_next = False
+        
+        for i in range(start, len(text)):
+            char = text[i]
             
-        return json.loads(text[start:end])
+            # Handle string literals to avoid counting braces inside strings
+            if char == '"' and not escape_next:
+                in_string = not in_string
+            
+            # Handle escapes
+            if char == '\\' and in_string:
+                escape_next = not escape_next
+                continue
+            else:
+                escape_next = False
+            
+            # Count braces only outside strings
+            if not in_string:
+                if char == '{':
+                    depth += 1
+                elif char == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+        
+        if depth != 0:
+            print(f"Gemini Profile Error: Unmatched braces in JSON")
+            return None
+        
+        json_str = text[start:end]
+        result = json.loads(json_str)
+        return result
+        
+    except json.JSONDecodeError as e:
+        print(f"Gemini Profile Error: JSON parsing failed - {e}")
+        print(f"Response text (first 500 chars): {text[:500]}")
+        print(f"Extracted JSON (first 500 chars): {json_str[:500] if 'json_str' in locals() else 'N/A'}")
+        return None
     except Exception as e:
-        print(f"Gemini Profile Error: {e}")
+        print(f"Gemini Profile Error: {type(e).__name__} - {e}")
         return None
 
 def get_result_summary(

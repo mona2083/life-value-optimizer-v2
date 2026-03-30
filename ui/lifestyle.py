@@ -323,40 +323,127 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
             if use_ai_for_values:
                 # Calls llm.py (Uses Gemini version until OpenAI migration is complete)
                 user_profile = financial_data["user_profile"]
-                profile_result = get_user_profile(user_profile["age"], user_profile["family"], combined_info_str, lang)
+                
+                # Create hash of current input data to detect changes
+                import json
+                import hashlib
+                
+                input_data_for_hash = {
+                    "age": user_profile.get("age"),
+                    "family": user_profile.get("family"),
+                    "combined_info": combined_info_str,
+                    "lang": lang,
+                }
+                current_input_hash = hashlib.md5(
+                    json.dumps(input_data_for_hash, sort_keys=True, default=str).encode()
+                ).hexdigest()
+                
+                # Check if input has changed since last AI analysis
+                last_input_hash = st.session_state.get("last_ai_input_hash", "")
+                input_changed = (current_input_hash != last_input_hash)
+                
+                # Only call LLM if:
+                # 1. We don't have cached ai_insight, OR
+                # 2. The input data has changed
+                if "ai_insight" not in st.session_state or input_changed:
+                    profile_result = get_user_profile(user_profile["age"], user_profile["family"], combined_info_str, lang)
+                    
+                    # Only proceed if we got a valid result
+                    if profile_result:
+                        # Update cache
+                        st.session_state["ai_insight"] = profile_result
+                        st.session_state["last_ai_input_hash"] = current_input_hash
+                        # Clear the AI items added flag when new analysis is done
+                        st.session_state["ai_items_added_from_insight"] = False
+                else:
+                    profile_result = st.session_state.get("ai_insight")
 
                 if profile_result:
                     _apply_weights_to_sliders(profile_result)
                     
-                    st.session_state["ai_insight"] = profile_result
+                    # AI推定食費の優先：AIがestimated_food_costを返した場合、それをデフォルト値より優先する
+                    ai_estimated_food = profile_result.get("estimated_food_cost")
+                    if ai_estimated_food and isinstance(ai_estimated_food, dict) and "minimalist_floor_cost" in ai_estimated_food:
+                        # Ensure location_adjustment is applied to minimalist_floor_cost
+                        loc_adjustment = float(ai_estimated_food.get("location_adjustment", 1.0) or 1.0)
+                        original_floor = float(ai_estimated_food.get("minimalist_floor_cost", 0) or 0)
+                        adjusted_floor = original_floor * loc_adjustment
                         
-                    for item in profile_result.get("custom_items", []):
-                        cat_key = item.get("category", "leisure")
-                        if cat_key in st.session_state.category_dfs:
-                            import pandas as pd
-                            new_row = {
-                                "id": f"custom_{hash(item.get('name_en'))}",
-                                "name_ja": item.get("name_ja", ""),
-                                "name_en": item.get("name_en", ""),
-                                "name": item.get("name_ja", ""),  # Fallback for UI
-                                "category": cat_key,
-                                "initial_cost": item.get("initial_cost", 0),
-                                "monthly_cost": item.get("monthly_cost", 0),
-                                "health": item.get("health", 5),
-                                "connections": item.get("connections", 5),
-                                "freedom": item.get("freedom", 5),
-                                "growth": item.get("growth", 5),
-                                "priority": 10,
-                                "mandatory": False,
-                                "ai_message": item.get("ai_message", "")
-                            }
-                            st.session_state.category_dfs[cat_key] = pd.concat(
-                                [st.session_state.category_dfs[cat_key], pd.DataFrame([new_row])],
-                                ignore_index=True
-                            )
+                        ai_estimated_food["minimalist_floor_cost"] = adjusted_floor
+                        
+                        financial_data["estimated_food_cost"] = ai_estimated_food
+                        st.session_state["estimated_food_cost"] = ai_estimated_food
                     
-                    # 確実に画面を再描画させて、下部のセッションステート表示処理を走らせる
-                    st.rerun()
+                    # Add AI recommended items ONLY if:
+                    # 1. They haven't been added from this specific insight yet, AND
+                    # 2. They don't already exist in category_dfs
+                    import pandas as pd
+                    
+                    # Check if AI items already exist by looking for custom_ai_ ids
+                    ai_items_exist_in_dfs = False
+                    for cat in st.session_state.category_dfs:
+                        df = st.session_state.category_dfs[cat]
+                        if "id" in df.columns and (df["id"].astype(str).str.startswith("custom_ai_")).any():
+                            ai_items_exist_in_dfs = True
+                            break
+                    
+                    # If input changed, remove old AI items before adding new ones
+                    if input_changed and ai_items_exist_in_dfs:
+                        for cat in st.session_state.category_dfs:
+                            df = st.session_state.category_dfs[cat]
+                            if "id" in df.columns:
+                                mask = df["id"].astype(str).str.startswith("custom_ai_")
+                                st.session_state.category_dfs[cat] = df[~mask].reset_index(drop=True)
+                        ai_items_exist_in_dfs = False
+                    
+                    # Add new AI items only if they don't exist
+                    if not ai_items_exist_in_dfs:
+                        for item in profile_result.get("recommended_actions", []):
+                            cat_key = item.get("category", "leisure")
+                            if cat_key in st.session_state.category_dfs:
+                                new_row = {
+                                    "id": f"custom_ai_{item.get('name_en', '').replace(' ', '_')}",
+                                    "name_ja": item.get("name_ja", ""),
+                                    "name_en": item.get("name_en", ""),
+                                    "name": item.get("name_ja", ""),  # Fallback for UI
+                                    "category": cat_key,
+                                    "initial_cost": item.get("initial_cost", 0),
+                                    "monthly_cost": item.get("monthly_cost", 0),
+                                    "health": item.get("health", 5),
+                                    "connections": item.get("connections", 5),
+                                    "freedom": item.get("freedom", 5),
+                                    "growth": item.get("growth", 5),
+                                    "priority": 10,
+                                    "mandatory": False,
+                                    "ai_message": item.get("ai_message", "")
+                                }
+                                st.session_state.category_dfs[cat_key] = pd.concat(
+                                    [st.session_state.category_dfs[cat_key], pd.DataFrame([new_row])],
+                                    ignore_index=True
+                                )
+                        
+                        st.session_state["ai_items_added_from_insight"] = True
+                    
+                    # Apply adjusted default item costs
+                    for adj_item in profile_result.get("adjusted_default_items", []):
+                        cat_key = adj_item.get("category", "leisure")
+                        item_name_ja = adj_item.get("name_ja", "")
+                        item_name_en = adj_item.get("name_en", "")
+                        adj_initial = adj_item.get("adjusted_initial_cost")
+                        adj_monthly = adj_item.get("adjusted_monthly_cost")
+                        
+                        if cat_key in st.session_state.category_dfs and adj_initial is not None and adj_monthly is not None:
+                            df = st.session_state.category_dfs[cat_key]
+                            # Find matching item by name
+                            mask = (df["name_ja"] == item_name_ja) | (df["name_en"] == item_name_en)
+                            if mask.any():
+                                df.loc[mask, "initial_cost"] = adj_initial
+                                df.loc[mask, "monthly_cost"] = adj_monthly
+                                st.session_state.category_dfs[cat_key] = df
+                    
+                    # Only rerun if we just added AI items for the first time
+                    if not st.session_state.get("ai_items_added_from_insight", False):
+                        st.rerun()
 
                 else:
                     fallback = infer_weights_from_survey(
@@ -390,91 +477,29 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
         
         res = st.session_state["ai_insight"]
         st.markdown(f"### 🤖 AI Insight")
-        custom_items_from_res = res.get("custom_items") or []
         
         # JSONキーが日本語に翻訳された場合もフォールバックとして対応
         is_ja = st.session_state.get("lang") == "ja"
         p_title = "ペルソナ (Persona):" if is_ja else "Persona:"
-        t_title = "心の綱引き (Tug-of-War):" if is_ja else "Tug-of-War:"
-        d_title = "悪魔の囁き (The Devil's Whisper):" if is_ja else "The Devil's Whisper:"
-        d_added = "追加アイテム" if is_ja else "Added Items"
+        s_title = "サマリー (Summary):" if is_ja else "Summary:"
+        c_title = "心の綱引き (Psychological Conflict):" if is_ja else "Psychological Conflict:"
 
-        persona = res.get("persona_title") or res.get("ペルソナ") or res.get("ペルソナ名") or res.get("アーキタイプ") or res.get("persona") or None
-        conflict = res.get("psychological_conflict") or res.get("心の綱引き") or res.get("心理的葛藤") or None
+        # profile は JSON内部のネストされたオブジェクト
+        profile = res.get("profile", {})
+        persona = profile.get("persona_title") or profile.get("ペルソナ") or profile.get("ペルソナ名") or profile.get("アーキタイプ") or profile.get("persona") or None
+        summary = profile.get("summary") or profile.get("サマリー") or None
+        conflict = profile.get("psychological_conflict") or profile.get("心の綱引き") or profile.get("心理的葛藤") or None
         
         if persona:
             st.info(f"🎭 **{p_title}** {persona}")
-
-        # == Added items declared by the AI profiling response (fallback to session data if needed) ==
-        added_items = []
-        seen_items = set()
-
-        def _add_item(name, ai_msg, initial_cost, monthly_cost):
-            key = (name, float(initial_cost or 0), float(monthly_cost or 0))
-            if key in seen_items:
-                return
-            seen_items.add(key)
-            added_items.append({
-                "name": name,
-                "ai_message": (ai_msg or "").strip(),
-                "initial_cost": float(initial_cost or 0),
-                "monthly_cost": float(monthly_cost or 0),
-            })
-
-        for item in custom_items_from_res:
-            if not isinstance(item, dict):
-                continue
-            name_fields = (
-                item.get("name_ja"),
-                item.get("name_en"),
-                item.get("name"),
-            )
-            name_disp = next((n for n in name_fields if isinstance(n, str) and n.strip()), "Custom Item")
-            _add_item(
-                name_disp,
-                item.get("ai_message", ""),
-                item.get("initial_cost", 0),
-                item.get("monthly_cost", 0),
-            )
-
-        for cat_key, df in st.session_state.get("category_dfs", {}).items():
-            if df.empty:
-                continue
-            for _, row in df.iterrows():
-                ai_message_raw = row.get("ai_message")
-                if not isinstance(ai_message_raw, str):
-                    ai_message_raw = ""
-                is_custom_id = isinstance(row.get("id"), str) and row["id"].startswith("custom_")
-                if not ai_message_raw.strip() and not is_custom_id:
-                    continue
-                name_ja = row.get("name_ja")
-                name_en = row.get("name_en")
-                name_fallback = row.get("name")
-                name_ja_str = name_ja if isinstance(name_ja, str) else ""
-                name_en_str = name_en if isinstance(name_en, str) else ""
-                name_fb_str = name_fallback if isinstance(name_fallback, str) else "Mystery Item"
-                name_disp = name_ja_str if is_ja and name_ja_str else (name_en_str if name_en_str else name_fb_str)
-                _add_item(
-                    name_disp,
-                    ai_message_raw,
-                    row.get("initial_cost", 0),
-                    row.get("monthly_cost", 0),
-                )
-        if added_items:
-            st.markdown(f"**📝 {d_added}**")
-            for item in added_items:
-                cost_line = f"Initial: ${item['initial_cost']:.0f} / Monthly: ${item['monthly_cost']:.0f}"
-                with st.container():
-                    st.markdown(f"**🌟 {item['name']}**  ·  {cost_line}")
-                    if item["ai_message"]:
-                        st.caption(f"🗣️ {d_title} — {item['ai_message']}")
-        elif custom_items_from_res:
-            st.caption("AIからのカスタムアイテムはありましたが、追加中にフィルタされています。セッションデータを確認してください。")
+        
+        if summary:
+            st.info(f"📋 **{s_title}** {summary}")
                     
         if conflict:
-            st.warning(f"⚖️ **{t_title}**\n\n{conflict}")
+            st.warning(f"⚖️ **{c_title}**\n\n{conflict}")
 
-        if not persona and not conflict and not added_items:
+        if not persona and not summary and not conflict:
             st.info("💡 （※AIモデルから回答を受信しましたが、ペルソナなどの追加インサイトが含まれていませんでした。プロンプトを更新したので、もう一度上部の「✨ 反映する」ボタンを押してみてください）")
 
     st.divider()

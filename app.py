@@ -50,6 +50,13 @@ st.caption(T.get("caption", ""))
 st.markdown(T["desc"])
 
 # =====================================================================
+# Step 0.5: Passion Text Input
+# =====================================================================
+passion_text = ui.render_passion_text_input(T)
+
+st.divider()
+
+# =====================================================================
 # メインフロー（新UI：9つのステップ）
 # =====================================================================
 
@@ -67,13 +74,21 @@ lifestyle_data["food"] = food_data
 
 # 食費推定（UI表示はしない。後続のロジック連携用に保持）
 food_estimation = ui.estimate_food_cost(financial_data["user_profile"], lifestyle_data)
-financial_data["estimated_food_cost"] = food_estimation
-st.session_state["estimated_food_cost"] = food_estimation
+
+# If LLM has already estimated food cost, don't overwrite it with defaults
+if not st.session_state.get("estimated_food_cost") or "style_coeff" in st.session_state.get("estimated_food_cost", {}):
+    # No LLM override yet, or it's the default calculation - safe to update
+    financial_data["estimated_food_cost"] = food_estimation
+    st.session_state["estimated_food_cost"] = food_estimation
+else:
+    # LLM has provided an override - use it
+    financial_data["estimated_food_cost"] = st.session_state.get("estimated_food_cost")
 
 st.divider()
 
 # 6. 価値観のLLM推論（ハイブリッド・プロファイリング）
 # Step 5の定型データと、ユーザーの自由記述を合わせてLLMに投げ、スライダーを自動設定します
+# Note: ui/lifestyle.py の render_llm_profiling 内で既に estimated_food_cost の処理が行われています
 weights_data = ui.render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=food_data)
 
 st.divider()
@@ -95,10 +110,19 @@ use_ai_for_optimize = st.toggle(
 
 if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
     with st.spinner(T.get("opt_spinner", "Running optimization…")):
-        food_info = financial_data.get("estimated_food_cost", {}) or {}
+        food_info = st.session_state.get("estimated_food_cost") or financial_data.get("estimated_food_cost", {}) or {}
+        
         minimalist_floor = float(food_info.get("minimalist_floor_cost", 0) or 0)
         food_stage1_max = int(float(food_info.get("food_stage1_band_max", 0) or 0))
         food_stage2_max = int(float(food_info.get("food_stage2_band_max", 0) or 0))
+        
+        # If food_stage bands are not in AI estimate, calculate them from minimalist_floor and monthly_food_cost
+        if food_stage1_max == 0 or food_stage2_max == 0:
+            monthly_food_cost = float(food_info.get("monthly_food_cost", minimalist_floor) or minimalist_floor)
+            mid_level_cost = (minimalist_floor + monthly_food_cost) / 2
+            food_stage1_max = int(max(0, mid_level_cost - minimalist_floor))
+            food_stage2_max = int(max(0, monthly_food_cost - mid_level_cost))
+        
         base_monthly_after_food = max(
             0,
             int(financial_data["monthly_budget"]) - int(round(minimalist_floor)),
@@ -159,8 +183,8 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                         "category": cat,
                         "priority": pri,
                         "mandatory": mand,
-                        "initial_cost": ic,
-                        "monthly_cost": mc,
+                        "initial_cost": int(ic),  # Ensure integer
+                        "monthly_cost": int(mc),  # Ensure integer
                         "health": row["health"],
                         "connections": row["connections"],
                         "freedom": row["freedom"],

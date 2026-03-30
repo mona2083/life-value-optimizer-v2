@@ -3,8 +3,9 @@ import streamlit as st
 from pydantic import BaseModel, Field
 from openai import OpenAI
 
-# OpenAIクライアントの初期化（本番環境では st.secrets または環境変数から取得）
-client = OpenAI(api_key=st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY")))
+# OpenAIクライアントの初期化（オプショナル - API キーがない場合は None）
+_api_key = st.secrets.get("OPENAI_API_KEY") if "OPENAI_API_KEY" in st.secrets else os.environ.get("OPENAI_API_KEY")
+client = OpenAI(api_key=_api_key) if _api_key else None
 
 # ── Pydanticスキーマの定義 ────────────────────────────────────────
 class ItemDefaults(BaseModel):
@@ -14,6 +15,12 @@ class ItemDefaults(BaseModel):
     connections: int = Field(description="Social connection & relationships score. Score from -10 to +10", default=0)
     freedom: int = Field(description="Time freedom & autonomy score. Score from -10 to +10", default=0)
     growth: int = Field(description="Personal growth & purpose score. Score from -10 to +10", default=0)
+
+class UserProfileFromPassion(BaseModel):
+    location: str = Field(description="Geographic location (e.g., 'Hawaii', 'Tokyo', 'Unknown')")
+    career: str = Field(description="Job title or career / education status (e.g., 'Software Engineer', 'Student', 'Unknown')")
+    existing_assets: str = Field(description="Existing possessions/assets (e.g., 'Car, Apartment', 'Unknown')")
+    interests: str = Field(description="Hobbies and interests (e.g., 'Surfing, Coffee, Coding', 'Unknown')")
 
 # ── AI推論関数 ──────────────────────────────────────────────────
 def get_item_defaults(item_name: str, lang: str) -> dict | None:
@@ -45,6 +52,73 @@ def get_item_defaults(item_name: str, lang: str) -> dict | None:
         print(f"[Error] OpenAI API parsing failed: {e}")
         return None
 
+def extract_user_profile_from_passion(passion_text: str, lang: str) -> dict:
+    """
+    ユーザーの自由記述テキストから Location, Career, Existing Assets, Interests を抽出する。
+    
+    Args:
+        passion_text: ユーザーが入力した自由記述テキスト
+        lang: 言語（'ja' または 'en'）
+    
+    Returns:
+        { "location": "...", "career": "...", "existing_assets": "...", "interests": "..." }
+    """
+    # OpenAI API キーがない場合はスキップ
+    if client is None:
+        return {
+            "location": "Unknown",
+            "career": "Unknown",
+            "existing_assets": "Unknown",
+            "interests": "Unknown",
+        }
+    
+    if lang == "ja":
+        system_prompt = """
+あなたはライフスタイル分析専門家です。
+ユーザーの自由記述テキストから以下の4つの項目を抽出してください：
+- Location（所在地）: どこに住んでいるか、または計画しているか
+- Career（職業/職種）: 現在の職業、職種、または学生などの状態
+- Existing Assets（既存資産）: 既に持っている車、不動産、スキルなど
+- Interests（興味・趣味）: 好きなこと、やりたいこと、趣味
+
+記述がない場合は 'Unknown' と記入してください。
+"""
+    else:
+        system_prompt = """
+You are a lifestyle analysis expert.
+From the user's free text, extract the following 4 items:
+- Location: Where they live or plan to live
+- Career: Current job, profession, or status (e.g., student)
+- Existing Assets: Things they already own (car, home, skills, etc.)
+- Interests: Hobbies, things they want to do, interests
+
+If an item is not mentioned, write 'Unknown'.
+"""
+    
+    try:
+        response = client.beta.chat.completions.parse(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": passion_text or ""}
+            ],
+            response_format=UserProfileFromPassion,
+            temperature=0.0,
+            seed=42
+        )
+        
+        parsed_data = response.choices[0].message.parsed
+        return parsed_data.model_dump()
+        
+    except Exception as e:
+        print(f"[Error] Failed to extract user profile: {e}")
+        return {
+            "location": "Unknown",
+            "career": "Unknown",
+            "existing_assets": "Unknown",
+            "interests": "Unknown",
+        }
+
 def get_result_summary(
     result: dict,
     user_profile: dict,
@@ -54,6 +128,10 @@ def get_result_summary(
     """
     最適化結果の数値を読み解き、自然言語で要約を生成する
     """
+    # OpenAI API キーがない場合はスキップ
+    if client is None:
+        return None
+    
     selected_names = [item["name"] for item in result["selected"]]
     
     # 既存のプロンプトテキストをそのまま流用

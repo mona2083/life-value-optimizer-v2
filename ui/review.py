@@ -5,6 +5,78 @@ from default_items import CATEGORIES
 def render_item_review(T, lang):
     st.header(T.get("step4_title", "4. ⚙️ Items"))
 
+    # =====================================================================
+    # Section 1: AI Recommended Items (Card Format)
+    # =====================================================================
+    recommended_items = st.session_state.get("ai_insight", {}).get("recommended_actions", [])
+    
+    if recommended_items:
+        st.info(T.get("ai_recommended_items_intro", "Based on your lifestyle, values, and budget, AI has proposed the following items:"))
+        
+        # Initialize tracking for skipped items
+        if "skipped_ai_items" not in st.session_state:
+            st.session_state.skipped_ai_items = set()
+        
+        for idx, item in enumerate(recommended_items):
+            category = item.get("category", "leisure")
+            name_ja = item.get("name_ja", "")
+            name_en = item.get("name_en", "")
+            initial = item.get("initial_cost", 0)
+            monthly = item.get("monthly_cost", 0)
+            item_id = f"custom_ai_{name_en.replace(' ', '_')}"
+            
+            display_name = name_ja if lang == "ja" else name_en
+            is_skipped = idx in st.session_state.skipped_ai_items
+            
+            # Card container
+            with st.container(border=True):
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    status = "❌ SKIPPED" if is_skipped else "✅ ADDED"
+                    st.markdown(f"**{display_name}**  \n初期: ${initial} / 月額: ${monthly}  \n*{status}*")
+                
+                with col2:
+                    if is_skipped:
+                        if st.button(T.get("ai_add_btn", "Add"), key=f"add_{idx}"):
+                            st.session_state.skipped_ai_items.discard(idx)
+                            # Re-add to category_dfs
+                            if category in st.session_state.category_dfs:
+                                new_row = {
+                                    "id": item_id,
+                                    "name_ja": name_ja,
+                                    "name_en": name_en,
+                                    "name": name_ja,
+                                    "category": category,
+                                    "initial_cost": int(initial),
+                                    "monthly_cost": int(monthly),
+                                    "health": item.get("health_impact", 5),
+                                    "connections": item.get("connections_impact", 5),
+                                    "freedom": item.get("freedom_impact", 5),
+                                    "growth": item.get("growth_impact", 5),
+                                    "priority": 10,
+                                    "mandatory": False,
+                                }
+                                st.session_state.category_dfs[category] = pd.concat(
+                                    [st.session_state.category_dfs[category], pd.DataFrame([new_row])],
+                                    ignore_index=True,
+                                )
+                            st.rerun()
+                    else:
+                        if st.button(T.get("ai_skip_btn", "Skip"), key=f"skip_{idx}"):
+                            st.session_state.skipped_ai_items.add(idx)
+                            # Remove from category_dfs
+                            if category in st.session_state.category_dfs:
+                                df = st.session_state.category_dfs[category]
+                                df = df[df.get("id") != item_id]
+                                st.session_state.category_dfs[category] = df.reset_index(drop=True)
+                            st.rerun()
+        
+        st.divider()
+
+    # =====================================================================
+    # Section 2: Advanced Item Editing
+    # =====================================================================
     def _mark_manual(key_name: str) -> None:
         """Flags that the user manually edited an item, preventing automatic overrides."""
         st.session_state[f"manual_{key_name}"] = True

@@ -182,3 +182,20 @@ def render_financial_setup(T):
             "debt_repayment": debt_repayment,
         }
     }
+
+def render_passion_text_input(T: dict) -> str:
+    """
+    ユーザーの自由記述テキスト入力UI
+    「あなたのことを教えてください」という1つの大きなテキストボックス
+    """
+    st.header(T.get("passion_title", "✨ Tell us about yourself"))
+    st.markdown(T.get("passion_intro", ""))
+    
+    passion_text = st.text_area(
+        T.get("passion_label", "Please describe your life, interests, location, work, and anything else important to you."),
+        height=150,
+        placeholder=T.get("passion_placeholder", "e.g., I'm a student living in Hawaii, I have a car, I love surfing and meeting new people..."),
+        key="passion_text"
+    )
+    
+    return passion_text

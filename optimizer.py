@@ -87,13 +87,15 @@ def run_optimizer(
         if item.get("mandatory", False):
             model.Add(x[i] == 1)
 
-    model.Add(sum(x[i] * candidates[i]["initial_cost"] for i in range(n)) <= total_budget)
+    # Convert costs to integers to avoid float constraint issue
+    model.Add(sum(x[i] * int(candidates[i]["initial_cost"]) for i in range(n)) <= total_budget)
     food_stage1_max = max(int(food_stage1_max or 0), 0)
     food_stage2_max = max(int(food_stage2_max or 0), 0)
     food_stage1_var = model.NewIntVar(0, food_stage1_max, "food_stage1_var")
     food_stage2_var = model.NewIntVar(0, food_stage2_max, "food_stage2_var")
+    # Convert costs to integers to avoid float constraint issue
     model.Add(
-        sum(x[i] * candidates[i]["monthly_cost"] for i in range(n))
+        sum(x[i] * int(candidates[i]["monthly_cost"]) for i in range(n))
         + food_stage1_var
         + food_stage2_var
         <= monthly_budget
@@ -124,9 +126,10 @@ def run_optimizer(
     items_value = sum(x[i] * utilities[i] for i in range(n))
 
     total_monthly_cost_var = model.NewIntVar(0, monthly_budget, "total_monthly_cost")
+    # Convert costs to integers to avoid float constraint issue
     model.Add(
         total_monthly_cost_var
-        == sum(x[i] * candidates[i]["monthly_cost"] for i in range(n))
+        == sum(x[i] * int(candidates[i]["monthly_cost"]) for i in range(n))
         + food_stage1_var
         + food_stage2_var
     )
