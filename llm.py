@@ -54,117 +54,6 @@ def food_weight_from_jelly(q_jelly: str | None) -> int:
     return max(1, min(10, int(v)))
 
 
-def _clean_json_string(json_str: str) -> str:
-    """
-    Pre-process extracted JSON string to handle actual newline characters within string fields.
-    Replaces real newlines with escaped \n sequences before JSON parsing.
-    """
-    if not json_str:
-        return json_str
-    
-    result = []
-    i = 0
-    in_string = False
-    escape_next = False
-    
-    while i < len(json_str):
-        char = json_str[i]
-        
-        # Handle escape sequences
-        if escape_next:
-            result.append(char)
-            escape_next = False
-            i += 1
-            continue
-        
-        if char == '\\':
-            result.append(char)
-            escape_next = True
-            i += 1
-            continue
-        
-        # Toggle string state
-        if char == '"':
-            in_string = not in_string
-            result.append(char)
-            i += 1
-            continue
-        
-        # Within string: replace actual newlines with spaces
-        if in_string and char in '\n\r':
-            # Skip consecutive whitespace at line boundaries
-            if char == '\r' and i + 1 < len(json_str) and json_str[i + 1] == '\n':
-                i += 2  # Skip \r\n
-            else:
-                i += 1  # Skip this newline
-            # Replace with single space to preserve word boundaries
-            result.append(' ')
-            continue
-        
-        # Normal character
-        result.append(char)
-        i += 1
-    
-    return ''.join(result)
-
-
-def _filter_out_duplicate_items(recommended_actions: list, lang: str = "en") -> list:
-    """
-    Filter out recommended items that are too similar to DEFAULT_ITEMS.
-    Uses keyword matching to detect semantic overlap.
-    
-    Args:
-        recommended_actions: List of recommended items from LLM
-        lang: Language for matching ('ja' or 'en')
-    
-    Returns:
-        Filtered list of recommended items
-    """
-    if not recommended_actions:
-        return []
-    
-    # Extract keyword sets from DEFAULT_ITEMS
-    default_keywords = set()
-    for item in DEFAULT_ITEMS:
-        name_key = "name_ja" if lang == "ja" else "name_en"
-        name = item.get(name_key, "").lower()
-        
-        # Break name into keywords (remove spaces, hiragana particles, etc.)
-        if lang == "ja":
-            # For Japanese: split on spaces and common particles
-            words = name.replace("・", " ").split()
-        else:
-            # For English: split on spaces and special characters
-            words = name.replace("/", " ").replace("-", " ").split()
-        
-        default_keywords.update(w for w in words if len(w) > 1)
-    
-    # Filter recommended items
-    filtered = []
-    for item in recommended_actions:
-        name_key = "name_ja" if lang == "ja" else "name_en"
-        name = item.get(name_key, "").lower()
-        
-        # Break recommendation name into keywords
-        if lang == "ja":
-            item_words = set(name.replace("・", " ").split())
-        else:
-            item_words = set(name.replace("/", " ").replace("-", " ").split())
-        
-        item_keywords = {w for w in item_words if len(w) > 1}
-        
-        # Calculate keyword overlap
-        overlap = len(item_keywords & default_keywords)
-        total = len(item_keywords)
-        overlap_ratio = overlap / total if total > 0 else 0
-        
-        # Keep if overlap is less than 30%
-        if overlap_ratio < 0.3:
-            filtered.append(item)
-    
-    return filtered
-
-
 def infer_weights_from_survey(
     lifestyle_data: dict,
     financial_data: dict,
@@ -286,15 +175,133 @@ def infer_weights_from_survey(
         "savings": _clamp_int_weight(s),
     }
 
+
+def _clean_json_string(json_str: str) -> str:
+    """
+    Pre-process extracted JSON string to handle actual newline characters within string fields.
+    Replaces real newlines with escaped \n sequences before JSON parsing.
+    """
+    if not json_str:
+        return json_str
+    
+    result = []
+    i = 0
+    in_string = False
+    escape_next = False
+    
+    while i < len(json_str):
+        char = json_str[i]
+        
+        # Handle escape sequences
+        if escape_next:
+            result.append(char)
+            escape_next = False
+            i += 1
+            continue
+        
+        if char == '\\':
+            result.append(char)
+            escape_next = True
+            i += 1
+            continue
+        
+        # Toggle string state
+        if char == '"':
+            in_string = not in_string
+            result.append(char)
+            i += 1
+            continue
+        
+        # Within string: replace actual newlines with escaped \n
+        if in_string and char in '\n\r':
+            # Skip consecutive whitespace at line boundaries
+            if char == '\r' and i + 1 < len(json_str) and json_str[i + 1] == '\n':
+                i += 2  # Skip \r\n
+            else:
+                i += 1  # Skip this newline
+            # Replace with single space to preserve word boundaries
+            result.append(' ')
+            continue
+        
+        # Normal character
+        result.append(char)
+        i += 1
+    
+    return ''.join(result)
+
+
+def _filter_out_duplicate_items(recommended_actions: list, lang: str = "en") -> list:
+    """
+    Filter out recommended items that are too similar to DEFAULT_ITEMS.
+    Uses keyword matching to detect semantic overlap.
+    
+    Args:
+        recommended_actions: List of recommended items from LLM
+        lang: Language for matching ('ja' or 'en')
+    
+    Returns:
+        Filtered list of recommended items
+    """
+    if not recommended_actions:
+        return []
+    
+    # Extract keyword sets from DEFAULT_ITEMS
+    default_keywords = set()
+    for item in DEFAULT_ITEMS:
+        name_key = "name_ja" if lang == "ja" else "name_en"
+        name = item.get(name_key, "").lower()
+        
+        # Break name into keywords (remove spaces, hiragana particles, etc.)
+        if lang == "ja":
+            # For Japanese, split by common separators and extract keywords
+            keywords = name.replace("・", " ").replace("・", " ").split()
+            default_keywords.update(keywords)
+        else:
+            # For English, split by spaces and '/'
+            keywords = name.replace("/", " ").replace("-", " ").split()
+            default_keywords.update([kw.lower() for kw in keywords if len(kw) > 2])
+    
+    # Filter recommended items
+    filtered = []
+    for item in recommended_actions:
+        name_key = "name_ja" if lang == "ja" else "name_en"
+        item_name = item.get(name_key, "").lower()
+        
+        # Extract keywords from recommended item
+        if lang == "ja":
+            item_keywords = set(item_name.replace("・", " ").split())
+        else:
+            item_keywords = set(word.lower() for word in item_name.replace("/", " ").replace("-", " ").split() if len(word) > 2)
+        
+        # Check overlap ratio
+        if default_keywords and item_keywords:
+            overlap = len(item_keywords & default_keywords)
+            overlap_ratio = overlap / len(item_keywords)
+            
+            # Filter out if > 30% keyword overlap (too similar)
+            if overlap_ratio <= 0.3:
+                filtered.append(item)
+        else:
+            filtered.append(item)
+    
+    return filtered
+
+
 def get_user_profile(age: int, family: str, combined_data_str: str, lang: str) -> dict | None:
     """
     心理学・行動経済学に基づいた定型回答と自由記述を複合解析し、価値観スコア(1-10)を推論する
     """
     
+    # Build list of items to EXCLUDE from recommendations
+    excluded_items_ja = [item.get("name_ja") for item in DEFAULT_ITEMS if item.get("name_ja")]
+    excluded_items_en = [item.get("name_en") for item in DEFAULT_ITEMS if item.get("name_en")]
+    excluded_items_str_ja = "\n".join([f"  • {name}" for name in excluded_items_ja])
+    excluded_items_str_en = "\n".join([f"  • {name}" for name in excluded_items_en])
+    
     # 熟練ライフプランナー兼心理学者としてのシステムプロンプト（JSON出力強制）
     sys_prompt = f"""
 OUTPUT LANGUAGE: {lang.upper()}
-CRITICAL: Write all content in {lang.upper()}, not English. If lang='ja', respond entirely in Japanese. If lang='en', respond entirely in English. Do NOT create duplicate fields (no persona_title_ja, summary_ja, etc.).
+CRITICAL: Write all content in {lang.upper()}, not English. If lang='ja', respond entirely in Japanese. Do NOT create duplicate fields (no persona_title_ja, summary_ja, etc.).
 
 Current Context: Year 2026. All prices, inflation, and cost-of-living references should be based on 2026 data.
 Economic Background: Inflation adjustments through 2026, regional cost variations, current market conditions.
@@ -318,7 +325,18 @@ Your task is to deeply analyze the user's survey data and free-text passion stat
 - Ensure a balanced mix: 2 for 'leisure', 2 for 'learning', 2 for 'wellbeing', 4 based on the user's specific passion text.
 - Each item must have REALISTIC 'monthly_cost' and 'initial_cost' reflecting the INFERRED 'location'. (e.g., Hawaii costs more than rural areas)
 - Each item MUST include 'name_ja' and 'name_en'.
-- **IMPORTANT**: Do NOT recommend items that are already in the provided Default Items list or similar category items.
+- **CRITICAL RULE**: Do NOT recommend ANY items that are already in the following Default Items list. Also avoid items with SIMILAR keywords or concepts:
+
+DEFAULT ITEMS TO EXCLUDE (Existing in the system):
+Japanese Names:
+{excluded_items_str_ja}
+
+English Names:
+{excluded_items_str_en}
+
+⚠️ STRICT FILTERING: If the user mentions "travel" and you want to recommend travel, check the list above first. 
+If "旅行・リトリート積立" or "Travel / Retreat Fund" exists, DO NOT generate a similar item like "週末旅行積立" or "Weekend Travel Fund".
+Always generate TRULY UNIQUE items that complement the defaults, not duplicate them.
 
 【Default Items Cost Adjustment (Optional)】
 You will receive a list of "Default Items" with current costs. If you can assess that costs should be adjusted based on the user's location, lifestyle, or career:
@@ -376,20 +394,33 @@ STRICTLY KEEP the EXACT JSON keys in English (do not translate keys like 'profil
   - NEVER CREATE alternate language fields.
 ⚠️ CRITICAL: NEVER INCLUDE NEWLINE/LINE BREAK CHARACTERS INSIDE JSON STRING VALUES. Write all text fields as continuous single lines. If you need to separate ideas, use periods (.) not newlines.
 
-JSON Example Structure (LANGUAGE: {lang}):
-Must return ONLY a valid JSON object. Do NOT include markdown formatting, backticks, or any conversational text outside the JSON.
-IMPORTANT: All text values (persona_title, summary, psychological_conflict) MUST be written in {lang} language (Japanese if lang=ja, English if lang=en).
-STRICTLY KEEP the EXACT JSON keys in English (do not translate keys like 'profile', 'weights', 'recommended_actions').
+【Profile Analysis Requirements】
+The profile fields MUST deliver genuine psychological insights, not just summaries:
 
-JSON Example Structure:
+1. "persona_title": A 2-4 word archetype that captures their deepest identity (e.g., "The Purposeful Pioneer", "The Harmony Seeker")
+
+2. "summary": Write 2-3 sentences that go DEEP. NO line breaks within the text—write as a continuous paragraph. Explain:
+   - Their core psychological drivers based on the data (e.g., "Your high Growth weight reveals a person driven by self-improvement, but your moderate Connections weight suggests you're still learning to balance personal ambition with deeper relationships")
+   - What patterns emerge from their choices and passions (e.g., their freedom-seeking behavior, their values alignment)
+   - Their unique positioning in life right now (context, life stage, what they're really searching for)
+   - Include a forward-looking element that shows their potential growth
+   Use warm, validating language that shows you *understand* them as a whole person.
+
+3. "psychological_conflict": Write 2-3 sentences (NO line breaks between) that reveal a REAL tension, then frame it as growth:
+   - Start by naming the conflict honestly (e.g., "You claim Connections is important, yet your budget shows minimal social spending, risking isolation")
+   - Explain the psychological ROOTS of this conflict (e.g., "This suggests a subconscious belief that investing in yourself must come at the cost of building relationships")
+   - END with a HOPEFUL reframe that shows this is actually a strength or opportunity (e.g., "But this awareness is your superpower—you're now positioned to deliberately strengthen BOTH your independence AND your bonds, creating a more integrated life")
+   Never be harsh. Be a therapist, not a critic.
+
+JSON Example Structure (LANGUAGE: {lang}):
 {{
   "profile": {{
     "location": "Honolulu",
-    "career": "Student",
+    "career": "Professional",
     "existing_assets": ["car"],
-    "persona_title": "Ambitious Nomad",
-    "summary": "A free-spirited student balancing wanderlust with financial responsibility.",
-    "psychological_conflict": "You logically want to save, but emotionally crave freedom and adventure."
+    "persona_title": "{"探求とバランスの調和者" if lang == "ja" else "The Purposeful Pioneer"}",
+    "summary": "{"あなたは、新しい経験への探求心と、日々の生活における調和を大切にする、バランスの取れた人物です。..." if lang == "ja" else "You are fundamentally a self-directed learner with an adventurous spirit..."}",
+    "psychological_conflict": "{"あなたの独立心と、他者との繋がりのバランスについて..." if lang == "ja" else "There is a creative tension in your profile..."}"
   }},
   "weights": {{
     "health": 6,
@@ -465,13 +496,12 @@ Use these items as reference for cost adjustment (if applicable):
             text = text.replace('  ', ' ')
         
         # Robust JSON extraction: Find the outermost valid JSON object
-        # Strategy: Start from first "{" and find matching "}"
         start = text.find("{")
         if start == -1:
             print(f"Gemini Profile Error: No JSON opening brace found in response")
             return None
         
-        # Track bracket depth to find matching closing brace
+        # Find matching closing brace more carefully
         depth = 0
         end = start
         in_string = False
@@ -480,16 +510,19 @@ Use these items as reference for cost adjustment (if applicable):
         for i in range(start, len(text)):
             char = text[i]
             
-            # Handle string literals to avoid counting braces inside strings
-            if char == '"' and not escape_next:
-                in_string = not in_string
-            
-            # Handle escapes
-            if char == '\\' and in_string:
-                escape_next = not escape_next
-                continue
-            else:
+            # Handle escape sequences
+            if escape_next:
                 escape_next = False
+                continue
+            
+            if char == '\\':
+                escape_next = True
+                continue
+            
+            # Handle string literals
+            if char == '"':
+                in_string = not in_string
+                continue
             
             # Count braces only outside strings
             if not in_string:
@@ -502,12 +535,30 @@ Use these items as reference for cost adjustment (if applicable):
                         break
         
         if depth != 0:
-            print(f"Gemini Profile Error: Unmatched braces in JSON")
+            print(f"Gemini Profile Error: Unmatched braces in JSON (depth={depth})")
+            print(f"Response text (first 1000 chars): {text[:1000]}")
             return None
         
         json_str = text[start:end]
+        # Additional cleaning as failsafe
         json_str = _clean_json_string(json_str)
-        result = json.loads(json_str)
+        
+        try:
+            result = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            print(f"Gemini Profile Error: JSON parsing failed - {e}")
+            print(f"Response text (first 500 chars): {text[:500]}")
+            print(f"Extracted JSON (first 500 chars): {json_str[:500] if json_str else 'N/A'}")
+            return None
+        
+        # Filter out recommended items that are similar to DEFAULT_ITEMS
+        # (Temporarily disabled - relying on LLM prompt to avoid duplicates. Can be re-enabled if needed)
+        # if "recommended_actions" in result and result["recommended_actions"]:
+        #     result["recommended_actions"] = _filter_out_duplicate_items(
+        #         result["recommended_actions"],
+        #         lang=lang
+        #     )
+        
         return result
         
     except json.JSONDecodeError as e:
@@ -618,64 +669,44 @@ def get_result_summary(
     }
 
     sys_prompt = f"""
-You are a world-class Life Coach, Financial Planner, and Behavioral Psychologist with 30 years of experience.
-Your mission is to provide a "Wake-up Call" analysis that connects mathematical optimization results with the user's soul and deep values.
+LANGUAGE: {lang.upper()} ONLY. No English.
+{f'出力は全て日本語です。' if lang == 'ja' else ''}
 
-【Analysis Directives - DO NOT just summarize the data】
-1. The AI is the Architect, the User provided the Blueprint:
-   DO NOT frame the results as the user's manual choices. Do NOT say "You chose X" or "You sacrificed Y". The user only provided their values; the mathematical Optimizer made the item selections. 
-   Instead, explain *WHY* the Optimizer built this specific plan for them. 
-   Example: "Because your core values heavily lean towards [Value], the system prioritized [Selected Item]. To make this mathematically possible within your budget, the optimizer had to filter out [Excluded Item]."
+🚨 EXTREME BREVITY REQUIREMENT - MANDATORY 🚨
+EVERY field MUST be EXACTLY 1 sentence. NO exceptions. NO longer responses.
+- concept: UNDER 12 words
+- analysis: UNDER 20 words
+- food_advice: UNDER 20 words
+- savings_advice: UNDER 20 words
+- blind_spot: UNDER 20 words
+- next_action: UNDER 20 words
 
-2. The Narrative of Trade-offs (Sacrifice):
-   Never just say "You bought X". Focus on what they sacrificed. Explain the psychological trade-off: "To protect your [Core Value], you made the difficult choice to let go of [Excluded Item]." Validate this sacrifice as a strategic life choice.
+You are a Life Coach providing SHORT, SHARP insights.
+Be warm but CONCISE. Reference specific items but keep EVERY response to 1 sentence max.
 
-3. The Psychology of Food:
-   - If Food is 'Minimalist/Base': Frame it positively as "Strategic Austerity" to buy future freedom or fund their other dreams.
-   - If Food is 'Upgraded': Frame it as "Vital Self-Investment", validating that quality food is the engine for their performance and well-being.
+Examples of CORRECT length:
+- concept: "Freedom through Strategic Choice" (3 words)
+- analysis: "Your system protected relationships over solo pursuits, honoring your core value." (11 words)
+- next_action: "Text one friend about doing a free activity together this week." (11 words)
 
-4. Savings Reality Check (2026 US Context):
-   Evaluate their savings allocation. Contrast it with their 'Savings' weight. Are they hoarding cash out of fear (sacrificing today's joy), or are they saving too little while claiming security is important? Provide a sharp, grounded perspective.
+CRITICAL: Responses longer than these examples will FAIL. Keep everything SHORT.
 
-5. The Blind Spot (Psychological Friction):
-   Find a contradiction between their stated Core Values and their actual budget allocation (e.g., claiming 'Connections' is a 10, but spending $0 on social activities). Point this out gently but firmly as a risk of burnout or regret.
+【Output Format - ULTRA-BRIEF & PUNCHY】
+Must return ONLY a valid JSON object. No markdown, backticks, or text outside JSON.
+⚠️ RESPOND ENTIRELY IN {lang.upper()}.
+{f'日本語で全て書いてください。英語は絶対に使わないでください。' if lang == 'ja' else ''}
 
-【Output Format】
-Must return ONLY a valid JSON object. Do not include markdown formatting, backticks, or any conversational text outside the JSON.
-The output language MUST be ENTIRELY in {lang}.
-
-⚠️ EXTREME BREVITY REQUIREMENT (CRITICAL):
-EVERY field MUST be EXACTLY 1 sentence ONLY. NO exceptions.
-Word limits (HARD CAPS):
-  - "concept": Maximum 12 words total
-  - "analysis": Maximum 20 words total
-  - "food_advice": Maximum 20 words total
-  - "savings_advice": Maximum 20 words total
-  - "blind_spot": Maximum 20 words total
-  - "next_action": Maximum 20 words total
-
-Formatting requirements:
-  - NO bullet points, NO sub-points, NO lists
-  - NO line breaks or paragraph separations
-  - Each field = 1 single sentence
-  - Punchy, direct, impactful language only
-  - If you exceed the word limit, you have FAILED (user will see this as malformed output)
-
-Concrete Examples of CORRECT LENGTH:
-  - concept: "Transform Ambition into Sustainable Joy" (5 words) ✓
-  - analysis: "Your freedom-seeking nature drives this budget—freedom purchases rank highest." (10 words) ✓
-  - food_advice: "Minimalist eating unlocks capital for your real passion: learning." (9 words) ✓
-  - blind_spot: "You claim connections matter, yet you've allocated zero for social bonding." (11 words) ✓
-  - next_action: "Book one coffee chat with a friend this week." (9 words) ✓
-
+STRICT WORD LIMITS (these are HARD caps, not suggestions):
 {{
-  "concept": "A short, catchy theme (max 12 words).",
-  "analysis": "One sentence max 20 words explaining item selection logic.",
-  "food_advice": "One sentence max 20 words on food budget strategy.",
-  "savings_advice": "One sentence max 20 words on savings reality.",
-  "blind_spot": "One sentence max 20 words on value-budget contradiction.",
-  "next_action": "One sentence max 20 words: a specific action they can take today."
+  "concept": "UNDER 12 WORDS. One punchy theme.",
+  "analysis": "1 SENTENCE MAX (under 20 words). Why this optimization matters.",
+  "food_advice": "1 SENTENCE MAX (under 20 words). One insight on their choice.",
+  "savings_advice": "1 SENTENCE MAX (under 20 words). One insight on their rate.",
+  "blind_spot": "1 SENTENCE MAX (under 20 words). One tension + reframe.",
+  "next_action": "1 SENTENCE MAX (under 20 words). Specific action for TODAY."
 }}
+
+FAILURE CRITERIA: If ANY field exceeds word limits or has multiple sentences, response is incorrect.
 """
 
     prompt = """Input Data (JSON):
@@ -687,19 +718,56 @@ Concrete Examples of CORRECT LENGTH:
         )
         text = response.text.strip()
         
-        # Pre-process: Replace raw newlines with spaces
+        # Pre-process: Replace raw newlines with spaces to prevent JSON parsing issues
         text = text.replace('\r\n', ' ').replace('\r', ' ')
+        # Replace multiple spaces with single space
         while '  ' in text:
             text = text.replace('  ', ' ')
         
         start = text.find("{")
-        end = text.rfind("}") + 1
-        if start == -1 or end <= start:
+        if start == -1:
+            print(f"Gemini Summary Error: No JSON opening brace found")
+            return None
+        
+        # Find matching closing brace
+        depth = 0
+        end = start
+        in_string = False
+        escape_next = False
+        
+        for i in range(start, len(text)):
+            char = text[i]
+            
+            if escape_next:
+                escape_next = False
+                continue
+            
+            if char == '\\':
+                escape_next = True
+                continue
+            
+            if char == '"':
+                in_string = not in_string
+                continue
+            
+            if not in_string:
+                if char == '{':
+                    depth += 1
+                elif char == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+        
+        if depth != 0:
+            print(f"Gemini Summary Error: Unmatched braces in JSON (depth={depth})")
             return None
         
         json_str = text[start:end]
+        # Additional cleaning as failsafe
         json_str = _clean_json_string(json_str)
         return json.loads(json_str)
-    except Exception as e:
-        print(f"Gemini Summary Error: {e}")
+        
+    except json.JSONDecodeError as e:
+        print(f"Gemini Summary Error: JSON parsing failed - {e}")
         return None
