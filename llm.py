@@ -21,7 +21,7 @@ generation_config = {
     "temperature": 0.3, # 心理判定としてブレを少なくするため低めに設定
     "top_p": 0.95,
     "top_k": 40,
-    "max_output_tokens": 1024,
+    "max_output_tokens": 4096,  # Increased to accommodate full JSON with all recommended actions
 }
 
 _client = genai.GenerativeModel(
@@ -175,6 +175,60 @@ def infer_weights_from_survey(
         "savings": _clamp_int_weight(s),
     }
 
+
+def _clean_json_string(json_str: str) -> str:
+    """
+    Pre-process extracted JSON string to handle actual newline characters within string fields.
+    Replaces real newlines with escaped \n sequences before JSON parsing.
+    """
+    if not json_str:
+        return json_str
+    
+    result = []
+    i = 0
+    in_string = False
+    escape_next = False
+    
+    while i < len(json_str):
+        char = json_str[i]
+        
+        # Handle escape sequences
+        if escape_next:
+            result.append(char)
+            escape_next = False
+            i += 1
+            continue
+        
+        if char == '\\':
+            result.append(char)
+            escape_next = True
+            i += 1
+            continue
+        
+        # Toggle string state
+        if char == '"':
+            in_string = not in_string
+            result.append(char)
+            i += 1
+            continue
+        
+        # Within string: replace actual newlines with spaces
+        if in_string and char in '\n\r':
+            if char == '\r' and i + 1 < len(json_str) and json_str[i + 1] == '\n':
+                i += 2  # Skip \r\n
+            else:
+                i += 1  # Skip this newline
+            # Replace with single space to preserve word boundaries
+            result.append(' ')
+            continue
+        
+        # Normal character
+        result.append(char)
+        i += 1
+    
+    return ''.join(result)
+
+
 def get_user_profile(age: int, family: str, combined_data_str: str, lang: str) -> dict | None:
     """
     心理学・行動経済学に基づいた定型回答と自由記述を複合解析し、価値観スコア(1-10)を推論する
@@ -182,8 +236,14 @@ def get_user_profile(age: int, family: str, combined_data_str: str, lang: str) -
     
     # 熟練ライフプランナー兼心理学者としてのシステムプロンプト（JSON出力強制）
     sys_prompt = f"""
+### ROLE & ARCHETYPE
+You are a World-Class Senior Life Planner and Behavioral Psychologist (30+ years experience).
+- TONE: Considerate, Optimistic, yet highly Professional. 
+- MISSION: Connect 2026 economic reality with the user's emotional "Passion."
+
 ### CONTEXT
-Current Date: March 2026. All inflation, regional cost variations, and market conditions must reflect March 2026 data.
+- Current Date: March 2026. (Reflect 2026 inflation, market prices, and cost-of-living indices).
+- Language: You MUST output all prose in {lang}.
 
 ### 1. DEEP PROFILING (LATENT INFERENCE)
 - **Location**: Detect from text (e.g., "KCC" -> Honolulu, HI). Default to "US_Average" if unknown.
@@ -199,25 +259,25 @@ Reference the 2026 US Base Unit ($400/mo avg).
 - **dining_out_additions**: Estimated monthly social eating spend based on 'connections' weight.
 - **minimalist_floor_cost**: (Base * Scale * 0.75 * Location Adj).
 
-### 3. DEFAULT ITEM OVERRIDE
-You will receive a list of "Default Items" with IDs.
-- If a cost is unrealistic for their 2026 location/career, provide an 'adjusted_default_items' array using the item 'id'.
-- If the user owns a 'car', ensure transport defaults reflect gas/maintenance, not purchase.
+### 3. DYNAMIC DEFAULT ITEM OVERRIDE
+You will receive "Default Items" with IDs.
+- Adjust costs ONLY if unrealistic for the inferred 2026 location/career.
+- If 'car' is owned, adjust transport defaults to reflect gas/maintenance only, not purchase.
 
-### 4. SMART ITEM GENERATION (EXACTLY 10 ITEMS)
-Generate EXACTLY 10 personalized RECOMMENDATIONS (NEW items, not defaults).
-- **Mix**: 2 Leisure, 2 Learning, 2 Wellbeing, 4 Passion-specific.
-- **FALLBACK**: Use localized templates [Commute, Gym, Skill-up, Hobby, Social, Tools] if the user's text is short.
-- **TONE FOR AI_MESSAGE**: Write as a mentor. Instead of "You should buy this," say "Given your passion for X, this is the engine that will fuel your daily joy."
+### 4. ITEM GENERATION (EXACTLY 10 ITEMS)
+Generate EXACTLY 10 personalized RECOMMENDATIONS (NOT in defaults).
+- **Split**: 2 Leisure, 2 Learning, 2 Wellbeing, 4 Passion-specific.
+- **FALLBACK**: If input is short, use templates [Commute, Gym, Skill-up, Hobby, Social, Tools] but LOCALISE them (e.g., 'Gym' in Hawaii -> 'Ocean/Hiking activities').
+- **TONE**: Write 'ai_message' as a mentor. Use: "Given your passion for X, this is the engine for your joy."
 
-### 5. VOICE & TONE GUIDELINES (FOR PROSE)
-- **Persona Title**: Inspiring but grounded (e.g., "The Strategic Voyager," "Resilient Architect of the Future").
-- **Psychological Conflict**: Be gentle. Use phrases like "Your heart yearns for X, while your wisdom seeks Y. Our goal is to bridge this gap."
-- **Summary**: Be optimistic. Frame the budget not as a "limit," but as a "resource allocation for your highest self."
+### 5. VOICE & TONE GUIDELINES
+- **Persona Title**: Inspiring (e.g., "The Strategic Voyager," "Architect of Dreams").
+- **Psychological Conflict**: Be empathetic. Frame it as "bridging the gap between heart and wisdom."
+- **Summary**: Be optimistic. Frame the budget as "fueling your highest potential."
 
 ### OUTPUT FORMAT (STRICT JSON)
-- **STRICT LANGUAGE RULE**: All prose fields (persona_title, summary, psychological_conflict, ai_message, name_ja, name_en) MUST be in {lang}.
-- NO Markdown, NO backticks. Answer ONLY in JSON format as specified. If you cannot answer, return null.
+- **STRICT LANGUAGE RULE**: All prose fields (persona_title, summary, psychological_conflict, ai_message, name_ja, name_en) MUST follow {lang}.
+- NO Markdown, NO backticks.
 
 JSON Example Structure:
 {{
@@ -226,8 +286,13 @@ JSON Example Structure:
     "career": "Student",
     "existing_assets": ["car"],
     "persona_title": "Ambitious Nomad",
-    "summary": "A free-spirited student balancing wanderlust with financial responsibility.",
-    "psychological_conflict": "You logically want to save, but emotionally crave freedom and adventure."
+    "summary": "Create a 2-sentence 'Strategic Blueprint' that synthesizes the entire optimized plan. 
+    Do not just list costs. Instead, explain how this specific allocation of resources directly empowers the user's 'Persona Title' to achieve their primary life mission. 
+    Focus on the synergy between their budget and their highest 'Core Value' score.",
+
+    "psychological_conflict": "Identify the specific 2-sentence tension between the user's emotional passion and their financial/logical constraints. 
+    Avoid generic 'want vs. save' templates. Instead, pinpoint the exact friction between two competing 'Core Values' (e.g., the high weight of 'Freedom' vs. the necessity of 'Savings'). 
+    Frame it as a 'noble struggle' that this specific optimized plan is designed to resolve.",
   }},
   "weights": {{
     "health": 6,
@@ -302,25 +367,27 @@ Use these items as reference for cost adjustment (if applicable):
             print(f"Gemini Profile Error: No JSON opening brace found in response")
             return None
         
-        # Track bracket depth to find matching closing brace
+        # Find matching closing brace, but fall back to last } if incomplete
         depth = 0
         end = start
         in_string = False
         escape_next = False
+        last_closing_brace = -1
         
         for i in range(start, len(text)):
             char = text[i]
             
-            # Handle string literals to avoid counting braces inside strings
-            if char == '"' and not escape_next:
-                in_string = not in_string
-            
-            # Handle escapes
-            if char == '\\' and in_string:
-                escape_next = not escape_next
-                continue
-            else:
+            # Handle escapes first (before checking quotes)
+            if escape_next:
                 escape_next = False
+                continue
+            
+            # Handle string literals to avoid counting braces inside strings
+            if char == '"':
+                in_string = not in_string
+            elif char == '\\' and in_string:
+                escape_next = True
+                continue
             
             # Count braces only outside strings
             if not in_string:
@@ -328,25 +395,43 @@ Use these items as reference for cost adjustment (if applicable):
                     depth += 1
                 elif char == '}':
                     depth -= 1
+                    last_closing_brace = i + 1
                     if depth == 0:
                         end = i + 1
                         break
         
+        # If we reached end and depth != 0, use the last closing brace we found
         if depth != 0:
-            print(f"Gemini Profile Error: Unmatched braces in JSON")
-            return None
+            if last_closing_brace > start:
+                print(f"⚠️  JSON incomplete (depth={depth}), using last closing brace at position {last_closing_brace}")
+                end = last_closing_brace
+            else:
+                print(f"Gemini Profile Error: No closing brace found in JSON")
+                print(f"Response text (first 1000 chars): {text[:1000]}")
+                return None
         
         json_str = text[start:end]
-        result = json.loads(json_str)
-        return result
+        json_str = _clean_json_string(json_str)
         
-    except json.JSONDecodeError as e:
-        print(f"Gemini Profile Error: JSON parsing failed - {e}")
-        print(f"Response text (first 500 chars): {text[:500]}")
-        print(f"Extracted JSON (first 500 chars): {json_str[:500] if 'json_str' in locals() else 'N/A'}")
-        return None
+        try:
+            result = json.loads(json_str)
+            return result
+        except json.JSONDecodeError as e:
+            print(f"⚠️  JSON decode error: {e}")
+            # Try to fix by adding closing braces
+            json_str_fixed = json_str + "}" * 5  # Add closing braces to close
+            try:
+                result = json.loads(json_str_fixed)
+                print(f"✅ Fixed JSON by adding closing braces")
+                return result
+            except:
+                print(f"Gemini Profile Error: JSON parsing failed even after fixing")
+                print(f"Original JSON (first 500 chars): {json_str[:500]}")
+                return None
+        
     except Exception as e:
         print(f"Gemini Profile Error: {type(e).__name__} - {e}")
+        print(f"Response text snippet: {text[:300] if 'text' in locals() else 'N/A'}")
         return None
 
 def get_result_summary(
@@ -485,7 +570,10 @@ The output language MUST be in {lang}.
 {{
   "concept": "A 1-line catchy, inspiring theme for this AI-proposed life plan (e.g., 'A Strategic Blueprint for Future Freedom').",
   "analysis": "3-4 sentences with warmth and insight. Explain *WHY* the optimizer built this specific path, framing it as a translation of their deepest values. Use emotional language that honors what they sacrificed. Example: 'Because your core values center on freedom and growth, this plan protects those above all. You made the courageous choice to let some desires fade so the essential ones could flourish. This is clarity, not compromise.'",
-  "food_advice": "2 sentences that reframe their food choice psychologically. If minimalist: 'Strategic austerity that buys you freedom.' If upgraded: 'A vital investment in your capacity to thrive.' Make it feel intentional, not restrictive or indulgent.",
+  "food_advice": "Create a 2-sentence psychological insight that bridges the user's chosen food style with their primary 'Core Value' and 'Career'. 
+    Avoid generic templates. Instead, explain WHY this specific choice is a tactical advantage for their 'Persona Title'. 
+    For example, if they are an 'Ambitious Student,' explain how their food choice specifically fuels their 'Growth' or 'Freedom' goals. 
+    Frame it as a conscious, empowering decision that supports their long-term blueprint."
   "savings_advice": "2 sentences evaluating the *psychological* meaning of their savings rate. Are they honoring security needs or hoarding out of fear? Are they investing in today's joy or sacrificing it? Provide warmth and gentle honest diagnosis.",
   "blind_spot": "A compassionate but direct insight pointing out a contradiction between their stated Core Values and budget allocation. Frame as opportunity for growth, not failure. Example: 'You rated Connections as 9, yet allocated $0 here. This gap might lead to burnout. What's the story—fear? Guilt? This gap deserves attention.'",
   "next_action": "One very specific, warmth-filled micro-action they can do TODAY. Make it feel achievable, human, and aligned with their deepest value. Example: 'Text one friend you've been meaning to reconnect with and suggest a free walk together—small moments rebuild bonds.'"
