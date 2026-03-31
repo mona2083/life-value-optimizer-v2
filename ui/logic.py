@@ -108,13 +108,15 @@ def init_category_dfs():
             df = pd.DataFrame(columns=[
                 "name_ja", "name_en", "initial_cost", "monthly_cost",
                 "priority", "mandatory", "memo_ja", "memo_en",
-                "health", "connections", "freedom", "growth"
+                "health", "connections", "freedom", "growth", "source"
             ])
         else:
             if "priority" not in df.columns:
                 df["priority"] = 3
             if "mandatory" not in df.columns:
                 df["mandatory"] = False
+            if "source" not in df.columns:
+                df["source"] = "default"
         
         # Add default `name` column to prevent KeyErrors in UI
         if "name" not in df.columns:
@@ -125,6 +127,8 @@ def init_category_dfs():
         df["monthly_cost"] = df["monthly_cost"].fillna(0).astype("float64")
         df["priority"] = df["priority"].fillna(3).astype("int64")
         df["mandatory"] = df["mandatory"].fillna(False).astype("bool")
+        if "source" not in df.columns:
+            df["source"] = "default"
         dfs[cat] = df
     return dfs
 

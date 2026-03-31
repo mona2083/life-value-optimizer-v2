@@ -183,6 +183,83 @@ def render_risk_and_results(
             else:
                 st.caption(f"💡 Food breakdown: Base(\\${int(food_floor):,}) + Std(\\${int(food_stage1_used):,}) + Upgrade(\\${int(food_stage2_used):,}) = Total(\\${int(food_total):,})")
 
+
+    # アイテム選択カウント表示
+    # アイテム選択カウント表示
+    if selected:
+        # source フィールドを使ってデフォルト vs AI/ユーザーアイテムを分別
+        default_selected = [it for it in selected if it.get("source") == "default"]
+        ai_or_user_selected = [it for it in selected if it.get("source") != "default"]
+        
+        # 全体のカウント
+        total_selected = len(selected)
+        default_count_selected = len(default_selected)
+        ai_count_selected = len(ai_or_user_selected)
+        
+        # デフォルト総数とAI/ユーザーアイテム総数
+        total_default_items = len(DEFAULT_ITEMS)
+        
+        # カテゴリごとのカウント（利用可能なアイテムを category_dfs から取得）
+        category_counts = {}
+        if hasattr(st.session_state, 'category_dfs'):
+            for cat_key in CATEGORIES[lang].keys():
+                if cat_key in st.session_state.category_dfs:
+                    dfs_cat = st.session_state.category_dfs[cat_key]
+                    # デフォルトアイテムの総数（category内）
+                    default_in_cat = len([it for it in DEFAULT_ITEMS if it.get("category") == cat_key])
+                    # AI/ユーザーアイテムの総数（category内、DataFrameから取得）
+                    ai_or_user_in_cat = len([idx for idx, row in dfs_cat.iterrows() if row.get("source") != "default"])
+                    # 選択されたアイテム数（category内）
+                    selected_in_cat = len([it for it in selected if it.get("category") == cat_key])
+                    
+                    if default_in_cat > 0 or ai_or_user_in_cat > 0 or selected_in_cat > 0:
+                        category_counts[cat_key] = {
+                            "selected": selected_in_cat,
+                            "default": default_in_cat,
+                            "ai_or_user": ai_or_user_in_cat,
+                            "total": default_in_cat + ai_or_user_in_cat
+                        }
+        
+        # 全体の選択率
+        if hasattr(st.session_state, 'category_dfs'):
+            total_ai_or_user_items = sum(len([idx for idx, row in dfs.iterrows() if row.get("source") != "default"]) 
+                                          for dfs in st.session_state.category_dfs.values())
+        else:
+            total_ai_or_user_items = ai_count_selected
+        
+        total_available = total_default_items + total_ai_or_user_items
+        selection_rate = (total_selected / total_available * 100) if total_available > 0 else 0
+        
+        with st.container(border=True):
+            st.markdown(f"**📦 {'アイテム選択数' if lang == 'ja' else 'Selected Items'} / 📊 {'カテゴリ別内訳' if lang == 'ja' else 'Category Breakdown'}**")
+            
+            # Summary row (4 metrics)
+            cell1, cell2, cell3, cell4 = st.columns([1, 1.2, 1.2, 1])
+            with cell1:
+                st.metric("選択数" if lang == "ja" else "Selected", f"{total_selected}")
+            with cell2:
+                st.metric("デフォルト" if lang == "ja" else "Default", f"{default_count_selected}/{total_default_items}") 
+            with cell3:
+                st.metric("AI提案" if lang == "ja" else "AI Proposed", f"{ai_count_selected}/{total_ai_or_user_items}")
+            with cell4:
+                st.metric("選択率" if lang == "ja" else "Rate", f"{selection_rate:.1f}%")
+            
+            st.divider()
+            
+            # Category breakdown
+            cat_list = []
+            for cat_key, cat_label in CATEGORIES[lang].items():
+                if cat_key in category_counts:
+                    counts = category_counts[cat_key]
+                    sel = counts["selected"]
+                    total = counts["total"]
+                    cat_list.append(f"• {cat_label}: {sel}/{total}")
+            if cat_list:
+                st.markdown("\n".join(cat_list))
+            else:
+                st.caption("選択されたアイテムはありません" if lang == "ja" else "No items selected")
+
+
     # AI Life Coach Dashboard (inserted between budget summary and category breakdown)
     st.divider()
     if not use_ai_for_summary:
@@ -708,6 +785,80 @@ def render_risk_and_results(
                 st.caption(f"💡 食費内訳：固定(\\${int(food_floor):,}) + 通常(\\${int(food_stage1_used):,}) + グレードアップ(\\${int(food_stage2_used):,}) = 合計(\\${int(food_total):,})")
             else:
                 st.caption(f"💡 Food breakdown: Base(\\${int(food_floor):,}) + Std(\\${int(food_stage1_used):,}) + Upgrade(\\${int(food_stage2_used):,}) = Total(\\${int(food_total):,})")
+
+    # アイテム選択カウント表示
+    if selected:
+        # source フィールドを使ってデフォルト vs AI/ユーザーアイテムを分別
+        default_selected = [it for it in selected if it.get("source") == "default"]
+        ai_or_user_selected = [it for it in selected if it.get("source") != "default"]
+        
+        # 全体のカウント
+        total_selected = len(selected)
+        default_count_selected = len(default_selected)
+        ai_count_selected = len(ai_or_user_selected)
+        
+        # デフォルト総数とAI/ユーザーアイテム総数
+        total_default_items = len(DEFAULT_ITEMS)
+        
+        # カテゴリごとのカウント（利用可能なアイテムを category_dfs から取得）
+        category_counts = {}
+        if hasattr(st.session_state, 'category_dfs'):
+            for cat_key in CATEGORIES[lang].keys():
+                if cat_key in st.session_state.category_dfs:
+                    dfs_cat = st.session_state.category_dfs[cat_key]
+                    # デフォルトアイテムの総数（category内）
+                    default_in_cat = len([it for it in DEFAULT_ITEMS if it.get("category") == cat_key])
+                    # AI/ユーザーアイテムの総数（category内、DataFrameから取得）
+                    ai_or_user_in_cat = len([idx for idx, row in dfs_cat.iterrows() if row.get("source") != "default"])
+                    # 選択されたアイテム数（category内）
+                    selected_in_cat = len([it for it in selected if it.get("category") == cat_key])
+                    
+                    if default_in_cat > 0 or ai_or_user_in_cat > 0 or selected_in_cat > 0:
+                        category_counts[cat_key] = {
+                            "selected": selected_in_cat,
+                            "default": default_in_cat,
+                            "ai_or_user": ai_or_user_in_cat,
+                            "total": default_in_cat + ai_or_user_in_cat
+                        }
+        
+        # 全体の選択率
+        if hasattr(st.session_state, 'category_dfs'):
+            total_ai_or_user_items = sum(len([idx for idx, row in dfs.iterrows() if row.get("source") != "default"]) 
+                                          for dfs in st.session_state.category_dfs.values())
+        else:
+            total_ai_or_user_items = ai_count_selected
+        
+        total_available = total_default_items + total_ai_or_user_items
+        selection_rate = (total_selected / total_available * 100) if total_available > 0 else 0
+        
+        with st.container(border=True):
+            st.markdown(f"**📦 {'アイテム選択数' if lang == 'ja' else 'Selected Items'} / 📊 {'カテゴリ別内訳' if lang == 'ja' else 'Category Breakdown'}**")
+            
+            # Summary row (4 metrics)
+            cell1, cell2, cell3, cell4 = st.columns([1, 1.2, 1.2, 1])
+            with cell1:
+                st.metric("選択数" if lang == "ja" else "Selected", f"{total_selected}")
+            with cell2:
+                st.metric("デフォルト" if lang == "ja" else "Default", f"{default_count_selected}/{total_default_items}") 
+            with cell3:
+                st.metric("AI提案" if lang == "ja" else "AI Proposed", f"{ai_count_selected}/{total_ai_or_user_items}")
+            with cell4:
+                st.metric("選択率" if lang == "ja" else "Rate", f"{selection_rate:.1f}%")
+            
+            st.divider()
+            
+            # Category breakdown
+            cat_list = []
+            for cat_key, cat_label in CATEGORIES[lang].items():
+                if cat_key in category_counts:
+                    counts = category_counts[cat_key]
+                    sel = counts["selected"]
+                    total = counts["total"]
+                    cat_list.append(f"• {cat_label}: {sel}/{total}")
+            if cat_list:
+                st.markdown("\n".join(cat_list))
+            else:
+                st.caption("選択されたアイテムはありません" if lang == "ja" else "No items selected")
 
     # AI Life Coach Dashboard (inserted between budget summary and category breakdown)
     st.divider()

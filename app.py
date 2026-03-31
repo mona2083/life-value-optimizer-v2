@@ -188,7 +188,8 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                         "health": row["health"],
                         "connections": row["connections"],
                         "freedom": row["freedom"],
-                        "growth": row["growth"]
+                        "growth": row["growth"],
+                        "source": row.get("source", "default")  # Preserve source field
                     })
 
         result = None

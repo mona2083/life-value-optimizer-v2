@@ -56,6 +56,7 @@ def render_item_review(T, lang):
                                     "growth": item.get("growth_impact", 5),
                                     "priority": 10,
                                     "mandatory": False,
+                                    "source": "ai",
                                 }
                                 st.session_state.category_dfs[category] = pd.concat(
                                     [st.session_state.category_dfs[category], pd.DataFrame([new_row])],
@@ -150,6 +151,7 @@ def render_item_review(T, lang):
                             "growth": int(grow_new),
                             "priority": int(priority_new),
                             "mandatory": False,
+                            "source": "user",
                         }
                         st.session_state.category_dfs[cat_key] = pd.concat(
                             [st.session_state.category_dfs[cat_key], pd.DataFrame([new_row])],

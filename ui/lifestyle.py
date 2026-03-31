@@ -481,8 +481,8 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
         # JSONキーが日本語に翻訳された場合もフォールバックとして対応
         is_ja = st.session_state.get("lang") == "ja"
         p_title = "ペルソナ (Persona):" if is_ja else "Persona:"
-        s_title = "サマリー (Summary):" if is_ja else "Summary:"
-        c_title = "心の綱引き (Psychological Conflict):" if is_ja else "Psychological Conflict:"
+        s_title = "サマリー (Summary)" if is_ja else "Summary"
+        c_title = "心の綱引き (Psychological Conflict)" if is_ja else "Psychological Conflict"
 
         # profile は JSON内部のネストされたオブジェクト
         profile = res.get("profile", {})
@@ -493,11 +493,21 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
         if persona:
             st.info(f"🎭 **{p_title}** {persona}")
         
-        if summary:
-            st.info(f"📋 **{s_title}** {summary}")
-                    
-        if conflict:
-            st.warning(f"⚖️ **{c_title}**\n\n{conflict}")
+        # サマリーと心の綱引きを2列コンテナで表示
+        if summary or conflict:
+            col_left, col_right = st.columns(2)
+            
+            with col_left:
+                if summary:
+                    with st.container(border=True):
+                        st.markdown(f"**📋 {s_title}**")
+                        st.write(summary)
+            
+            with col_right:
+                if conflict:
+                    with st.container(border=True):
+                        st.markdown(f"**⚖️ {c_title}**")
+                        st.write(conflict)
 
         if not persona and not summary and not conflict:
             st.info("💡 （※AIモデルから回答を受信しましたが、ペルソナなどの追加インサイトが含まれていませんでした。プロンプトを更新したので、もう一度上部の「✨ 反映する」ボタンを押してみてください）")
