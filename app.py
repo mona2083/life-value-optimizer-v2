@@ -8,6 +8,12 @@ from lang import LANG
 from default_items import CATEGORIES, CATEGORY_CONSTRAINTS
 from risk_cost import calculate_risk_costs
 
+# New architecture imports
+from core.food_calculator import calculate_food_estimate
+from core.models import UserProfile, FoodData, FoodEstimate
+from state.session import SessionState
+from ai.profile_extractor import ProfileExtractor
+
 # =====================================================================
 # Initialization and State Management
 # =====================================================================
@@ -40,6 +46,9 @@ with st.sidebar:
         st.rerun()
 
     if st.button(T["reset_btn"]):
+        # Clear new state management
+        SessionState.clear_all()
+        # Clear old state management
         for key in list(st.session_state.keys()):
             if key != "lang":
                 del st.session_state[key]
@@ -72,17 +81,58 @@ lifestyle_data = ui.render_lifestyle_questions(T, lang)
 food_data = ui.render_food_questions(T)
 lifestyle_data["food"] = food_data
 
-# 食費推定（UI表示はしない。後続のロジック連携用に保持）
-food_estimation = ui.estimate_food_cost(financial_data["user_profile"], lifestyle_data)
+# 食費推定（NEW: Location-aware calculation from new architecture）
+# Using the new core/food_calculator which includes location detection
+user_profile = financial_data.get("user_profile", {})
+passion_text = st.session_state.get("passion_text", "")
 
-# If LLM has already estimated food cost, don't overwrite it with defaults
-if not st.session_state.get("estimated_food_cost") or "style_coeff" in st.session_state.get("estimated_food_cost", {}):
-    # No LLM override yet, or it's the default calculation - safe to update
-    financial_data["estimated_food_cost"] = food_estimation
-    st.session_state["estimated_food_cost"] = food_estimation
+# Create FoodData object for the calculator
+food_obj = FoodData(
+    home_meal_style=food_data.get("home_meal_style", "standard"),
+    dining_out_tone=food_data.get("dining_out_tone", "utility"),
+    dining_out_frequency=food_data.get("dining_out_frequency", "0_1"),
+    optional_alcohol=food_data.get("optional_alcohol", False),
+    optional_supplements=food_data.get("optional_supplements", False),
+    optional_special_diet=food_data.get("optional_special_diet", False),
+)
+
+# Calculate food estimate (includes location adjustment)
+# Determine family status from household composition
+adults = int(user_profile.get("household_adults", 1) or 1)
+children = int(user_profile.get("household_children", 0) or 0)
+infants = int(user_profile.get("household_infants", 0) or 0)
+total_kids = children + infants
+
+if total_kids > 0:
+    family_status = "family_with_kids"
+elif adults > 1:
+    family_status = "couple"
 else:
-    # LLM has provided an override - use it
-    financial_data["estimated_food_cost"] = st.session_state.get("estimated_food_cost")
+    family_status = "single"
+
+user_profile_obj = UserProfile(
+    age=int(user_profile.get("age", 30) or 30),
+    family_status=family_status,
+    household_adults=adults,
+    household_children=children,
+    household_infants=infants,
+    debt_repayment=float(user_profile.get("debt_repayment", 0) or 0),
+    passion_text=passion_text,
+)
+
+food_estimate = calculate_food_estimate(user_profile_obj, food_obj, passion_text)
+food_estimation = food_estimate.to_dict()
+
+# Store in both old and new state management for compatibility
+SessionState.set_food_estimate(food_estimate)
+financial_data["estimated_food_cost"] = food_estimation
+st.session_state["estimated_food_cost"] = food_estimation
+
+print(f"🍽️ Food Estimate Calculated:")
+print(f"   minimalist_floor_cost: ${food_estimate.minimalist_floor_cost:,.2f}")
+print(f"   food_stage1_band_max: ${food_estimate.food_stage1_band_max:,.2f}")
+print(f"   food_stage2_band_max: ${food_estimate.food_stage2_band_max:,.2f}")
+print(f"   location_adjustment: {food_estimate.location_adjustment}x")
 
 st.divider()
 
