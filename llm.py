@@ -18,10 +18,10 @@ genai.configure(api_key=api_key)
 
 # モデルの初期化
 generation_config = {
-    "temperature": 0.3, # 心理判定としてブレを少なくするため低めに設定
-    "top_p": 0.95,
+    "temperature": 0.2, # 心理判定としてブレを少なくするため、さらに低めに設定
+    "top_p": 0.9,
     "top_k": 40,
-    "max_output_tokens": 1024,
+    "max_output_tokens": 2048,  # Increased to accommodate full detailed responses
 }
 
 _client = genai.GenerativeModel(
@@ -52,6 +52,117 @@ def food_weight_from_jelly(q_jelly: str | None) -> int:
     letter = _choice_letter(q_jelly or "")
     v = JELLY_FOOD_WEIGHT.get(letter, 5)
     return max(1, min(10, int(v)))
+
+
+def _clean_json_string(json_str: str) -> str:
+    """
+    Pre-process extracted JSON string to handle actual newline characters within string fields.
+    Replaces real newlines with escaped \n sequences before JSON parsing.
+    """
+    if not json_str:
+        return json_str
+    
+    result = []
+    i = 0
+    in_string = False
+    escape_next = False
+    
+    while i < len(json_str):
+        char = json_str[i]
+        
+        # Handle escape sequences
+        if escape_next:
+            result.append(char)
+            escape_next = False
+            i += 1
+            continue
+        
+        if char == '\\':
+            result.append(char)
+            escape_next = True
+            i += 1
+            continue
+        
+        # Toggle string state
+        if char == '"':
+            in_string = not in_string
+            result.append(char)
+            i += 1
+            continue
+        
+        # Within string: replace actual newlines with spaces
+        if in_string and char in '\n\r':
+            # Skip consecutive whitespace at line boundaries
+            if char == '\r' and i + 1 < len(json_str) and json_str[i + 1] == '\n':
+                i += 2  # Skip \r\n
+            else:
+                i += 1  # Skip this newline
+            # Replace with single space to preserve word boundaries
+            result.append(' ')
+            continue
+        
+        # Normal character
+        result.append(char)
+        i += 1
+    
+    return ''.join(result)
+
+
+def _filter_out_duplicate_items(recommended_actions: list, lang: str = "en") -> list:
+    """
+    Filter out recommended items that are too similar to DEFAULT_ITEMS.
+    Uses keyword matching to detect semantic overlap.
+    
+    Args:
+        recommended_actions: List of recommended items from LLM
+        lang: Language for matching ('ja' or 'en')
+    
+    Returns:
+        Filtered list of recommended items
+    """
+    if not recommended_actions:
+        return []
+    
+    # Extract keyword sets from DEFAULT_ITEMS
+    default_keywords = set()
+    for item in DEFAULT_ITEMS:
+        name_key = "name_ja" if lang == "ja" else "name_en"
+        name = item.get(name_key, "").lower()
+        
+        # Break name into keywords (remove spaces, hiragana particles, etc.)
+        if lang == "ja":
+            # For Japanese: split on spaces and common particles
+            words = name.replace("・", " ").split()
+        else:
+            # For English: split on spaces and special characters
+            words = name.replace("/", " ").replace("-", " ").split()
+        
+        default_keywords.update(w for w in words if len(w) > 1)
+    
+    # Filter recommended items
+    filtered = []
+    for item in recommended_actions:
+        name_key = "name_ja" if lang == "ja" else "name_en"
+        name = item.get(name_key, "").lower()
+        
+        # Break recommendation name into keywords
+        if lang == "ja":
+            item_words = set(name.replace("・", " ").split())
+        else:
+            item_words = set(name.replace("/", " ").replace("-", " ").split())
+        
+        item_keywords = {w for w in item_words if len(w) > 1}
+        
+        # Calculate keyword overlap
+        overlap = len(item_keywords & default_keywords)
+        total = len(item_keywords)
+        overlap_ratio = overlap / total if total > 0 else 0
+        
+        # Keep if overlap is less than 30%
+        if overlap_ratio < 0.3:
+            filtered.append(item)
+    
+    return filtered
 
 
 def infer_weights_from_survey(
@@ -182,6 +293,9 @@ def get_user_profile(age: int, family: str, combined_data_str: str, lang: str) -
     
     # 熟練ライフプランナー兼心理学者としてのシステムプロンプト（JSON出力強制）
     sys_prompt = f"""
+OUTPUT LANGUAGE: {lang.upper()}
+CRITICAL: Write all content in {lang.upper()}, not English. If lang='ja', respond entirely in Japanese. If lang='en', respond entirely in English. Do NOT create duplicate fields (no persona_title_ja, summary_ja, etc.).
+
 Current Context: Year 2026. All prices, inflation, and cost-of-living references should be based on 2026 data.
 Economic Background: Inflation adjustments through 2026, regional cost variations, current market conditions.
 
@@ -254,6 +368,15 @@ Validation: minimalist_floor_cost should be 60-85% of monthly_food_cost. If not,
 IMPORTANT: location_adjustment must be > 1.0 if Hawaii/Alaska/urban, < 1.0 if rural. Do NOT return 1.0 unless user is in mainland US average area.
 
 【Output Format】
+Must return ONLY a valid JSON object. Do NOT include markdown formatting, backticks, or any conversational text outside the JSON.
+STRICTLY KEEP the EXACT JSON keys in English (do not translate keys like 'profile', 'weights', 'recommended_actions').
+⚠️ CRITICAL: DO NOT CREATE DUPLICATE FIELDS. There should be ONLY ONE set of keys, not separate fields for different languages.
+  - Output ONLY: persona_title, summary, psychological_conflict (NOT persona_title_ja, summary_ja, etc.)
+  - All content MUST be in {lang}: if lang='ja', write in Japanese; if lang='en', write in English.
+  - NEVER CREATE alternate language fields.
+⚠️ CRITICAL: NEVER INCLUDE NEWLINE/LINE BREAK CHARACTERS INSIDE JSON STRING VALUES. Write all text fields as continuous single lines. If you need to separate ideas, use periods (.) not newlines.
+
+JSON Example Structure (LANGUAGE: {lang}):
 Must return ONLY a valid JSON object. Do NOT include markdown formatting, backticks, or any conversational text outside the JSON.
 IMPORTANT: All text values (persona_title, summary, psychological_conflict) MUST be written in {lang} language (Japanese if lang=ja, English if lang=en).
 STRICTLY KEEP the EXACT JSON keys in English (do not translate keys like 'profile', 'weights', 'recommended_actions').
@@ -334,6 +457,13 @@ Use these items as reference for cost adjustment (if applicable):
         )
         text = response.text.strip()
         
+        # Pre-process: Replace raw newlines with spaces to prevent JSON parsing issues
+        # This handles cases where LLM output contains actual line breaks in JSON string values
+        text = text.replace('\r\n', ' ').replace('\r', ' ')
+        # Replace multiple spaces with single space
+        while '  ' in text:
+            text = text.replace('  ', ' ')
+        
         # Robust JSON extraction: Find the outermost valid JSON object
         # Strategy: Start from first "{" and find matching "}"
         start = text.find("{")
@@ -376,6 +506,7 @@ Use these items as reference for cost adjustment (if applicable):
             return None
         
         json_str = text[start:end]
+        json_str = _clean_json_string(json_str)
         result = json.loads(json_str)
         return result
         
@@ -511,15 +642,39 @@ Your mission is to provide a "Wake-up Call" analysis that connects mathematical 
 
 【Output Format】
 Must return ONLY a valid JSON object. Do not include markdown formatting, backticks, or any conversational text outside the JSON.
-The output language MUST be in {lang}.
+The output language MUST be ENTIRELY in {lang}.
+
+⚠️ EXTREME BREVITY REQUIREMENT (CRITICAL):
+EVERY field MUST be EXACTLY 1 sentence ONLY. NO exceptions.
+Word limits (HARD CAPS):
+  - "concept": Maximum 12 words total
+  - "analysis": Maximum 20 words total
+  - "food_advice": Maximum 20 words total
+  - "savings_advice": Maximum 20 words total
+  - "blind_spot": Maximum 20 words total
+  - "next_action": Maximum 20 words total
+
+Formatting requirements:
+  - NO bullet points, NO sub-points, NO lists
+  - NO line breaks or paragraph separations
+  - Each field = 1 single sentence
+  - Punchy, direct, impactful language only
+  - If you exceed the word limit, you have FAILED (user will see this as malformed output)
+
+Concrete Examples of CORRECT LENGTH:
+  - concept: "Transform Ambition into Sustainable Joy" (5 words) ✓
+  - analysis: "Your freedom-seeking nature drives this budget—freedom purchases rank highest." (10 words) ✓
+  - food_advice: "Minimalist eating unlocks capital for your real passion: learning." (9 words) ✓
+  - blind_spot: "You claim connections matter, yet you've allocated zero for social bonding." (11 words) ✓
+  - next_action: "Book one coffee chat with a friend this week." (9 words) ✓
 
 {{
-  "concept": "A 1-line catchy, inspiring theme for this AI-proposed life plan (e.g., 'A Strategic Blueprint for Future Freedom').",
-  "analysis": "3-4 sentences explaining WHY the optimizer prioritized certain items and excluded others, framing it as a perfect mathematical translation of their core values.",
-  "food_advice": "2 sentences explaining the optimizer's logic behind their food budget allocation.",
-  "savings_advice": "2 sentences evaluating the calculated savings rate and what it means for their future.",
-  "blind_spot": "A sharp psychological insight pointing out a contradiction between their stated values and the actual mathematical limits of their budget.",
-  "next_action": "One very specific, non-financial micro-action they can do TODAY based on this proposed plan."
+  "concept": "A short, catchy theme (max 12 words).",
+  "analysis": "One sentence max 20 words explaining item selection logic.",
+  "food_advice": "One sentence max 20 words on food budget strategy.",
+  "savings_advice": "One sentence max 20 words on savings reality.",
+  "blind_spot": "One sentence max 20 words on value-budget contradiction.",
+  "next_action": "One sentence max 20 words: a specific action they can take today."
 }}
 """
 
@@ -531,11 +686,20 @@ The output language MUST be in {lang}.
             contents=f"{sys_prompt}\n\n{prompt}"
         )
         text = response.text.strip()
+        
+        # Pre-process: Replace raw newlines with spaces
+        text = text.replace('\r\n', ' ').replace('\r', ' ')
+        while '  ' in text:
+            text = text.replace('  ', ' ')
+        
         start = text.find("{")
         end = text.rfind("}") + 1
         if start == -1 or end <= start:
             return None
-        return json.loads(text[start:end])
+        
+        json_str = text[start:end]
+        json_str = _clean_json_string(json_str)
+        return json.loads(json_str)
     except Exception as e:
         print(f"Gemini Summary Error: {e}")
         return None
