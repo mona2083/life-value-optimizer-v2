@@ -82,8 +82,91 @@ def render_item_review(T, lang):
         """Flags that the user manually edited an item, preventing automatic overrides."""
         st.session_state[f"manual_{key_name}"] = True
 
+    def _default_only(df: pd.DataFrame) -> pd.DataFrame:
+        """Return only default items, excluding AI/user/custom rows."""
+        if df is None or df.empty:
+            return df
+
+        if "id" in df.columns:
+            mask = df["id"].astype(str).str.startswith("default_")
+            if mask.any():
+                return df[mask]
+
+        if "source" in df.columns:
+            return df[df["source"].astype(str).str.lower() == "default"]
+
+        return df.iloc[0:0]
+
+    def _render_item_rows(cat_key: str, df: pd.DataFrame) -> None:
+        """Render editable rows for a category using existing session key scheme."""
+        for idx, row in df.iterrows():
+            pri_key = f"priority_{cat_key}_{idx}"
+            mc_key = f"monthly_cost_{cat_key}_{idx}"
+            ic_key = f"initial_cost_{cat_key}_{idx}"
+            mand_key = f"mandatory_{cat_key}_{idx}"
+
+            if pri_key not in st.session_state:
+                st.session_state[pri_key] = row["priority"]
+            if mc_key not in st.session_state:
+                st.session_state[mc_key] = row["monthly_cost"]
+            if ic_key not in st.session_state:
+                st.session_state[ic_key] = row["initial_cost"]
+            if mand_key not in st.session_state:
+                st.session_state[mand_key] = row["mandatory"]
+
+            c0, c1, c2, c3 = st.columns([0.7, 2, 1, 1])
+            with c0:
+                is_mandatory = st.checkbox(
+                    T.get("mandatory_label", "Mandatory"),
+                    key=mand_key,
+                    on_change=_mark_manual,
+                    args=(mand_key,),
+                )
+                if is_mandatory and st.session_state.get(pri_key, 0) <= 0:
+                    st.session_state[pri_key] = 1
+            with c1:
+                lbl = f"{row['name']} {T.get('item_slider_suffix', '')}"
+                if st.session_state[mand_key]:
+                    st.caption("✅ " + T.get("item_slider_caption_mandatory", "Must have (Cannot be excluded)"))
+                st.slider(lbl, 0, 10, key=pri_key, on_change=_mark_manual, args=(pri_key,))
+            with c2:
+                st.number_input(T.get("lbl_mc", "Monthly $"), min_value=0, key=mc_key, on_change=_mark_manual, args=(mc_key,))
+            with c3:
+                st.number_input(T.get("lbl_ic", "Initial $"), min_value=0, key=ic_key, on_change=_mark_manual, args=(ic_key,))
+
     with st.expander(T.get("item_review_expander", "Review & Edit Categorized Items")):
         st.info(T.get("item_review_info", "Review and manually adjust the estimated items derived from your lifestyle answers if needed."))
+        st.divider()
+        st.subheader(T.get("item_list_subheader", "Item List"))
+
+        transport_label = CATEGORIES[lang].get("transport", "🚗 Transport")
+        others_label = "その他" if lang == "ja" else "Others"
+        tab_transport, tab_others = st.tabs([transport_label, others_label])
+
+        with tab_transport:
+            df_transport = st.session_state.category_dfs.get("transport", pd.DataFrame())
+            df_transport = _default_only(df_transport)
+            if df_transport.empty:
+                st.caption(T.get("no_default_items", "No default items."))
+            else:
+                _render_item_rows("transport", df_transport)
+
+        with tab_others:
+            other_keys = [k for k in CATEGORIES[lang].keys() if k != "transport"]
+            rendered_any = False
+            for cat_key in other_keys:
+                df_cat = st.session_state.category_dfs.get(cat_key, pd.DataFrame())
+                df_cat = _default_only(df_cat)
+                if df_cat.empty:
+                    continue
+
+                rendered_any = True
+                st.markdown(f"**{CATEGORIES[lang].get(cat_key, cat_key)}**")
+                _render_item_rows(cat_key, df_cat)
+                st.divider()
+
+            if not rendered_any:
+                st.caption(T.get("no_default_items", "No default items."))
 
         st.subheader(T.get("add_custom_item_title", "Add Custom Item"))
         with st.form("add_custom_item_form", clear_on_submit=True):
@@ -159,50 +242,3 @@ def render_item_review(T, lang):
                         )
                         st.success(T.get("success_item_added", "Item added successfully!"))
                         st.rerun()
-
-        st.divider()
-        st.subheader(T.get("item_list_subheader", "Item List"))
-        cat_items = list(CATEGORIES[lang].items())
-        cat_tabs = st.tabs([cat_name for _, cat_name in cat_items])
-
-        for tab, (cat_key, cat_name) in zip(cat_tabs, cat_items):
-            with tab:
-                df = st.session_state.category_dfs[cat_key]
-
-                for idx, row in df.iterrows():
-                    # Display values potentially overridden by lifestyle questionnaire dynamically
-                    pri_key = f"priority_{cat_key}_{idx}"
-                    mc_key = f"monthly_cost_{cat_key}_{idx}"
-                    ic_key = f"initial_cost_{cat_key}_{idx}"
-                    mand_key = f"mandatory_{cat_key}_{idx}"
-
-                    # Fallback to dataframe default if missing from session state (e.g., app reset)
-                    if pri_key not in st.session_state:
-                        st.session_state[pri_key] = row["priority"]
-                    if mc_key not in st.session_state:
-                        st.session_state[mc_key] = row["monthly_cost"]
-                    if ic_key not in st.session_state:
-                        st.session_state[ic_key] = row["initial_cost"]
-                    if mand_key not in st.session_state:
-                        st.session_state[mand_key] = row["mandatory"]
-
-                    c0, c1, c2, c3 = st.columns([0.7, 2, 1, 1])
-                    with c0:
-                        is_mandatory = st.checkbox(
-                            T.get("mandatory_label", "Mandatory"),
-                            key=mand_key,
-                            on_change=_mark_manual,
-                            args=(mand_key,),
-                        )
-                        # Ensure priority is at least 1 if an item is marked mandatory
-                        if is_mandatory and st.session_state.get(pri_key, 0) <= 0:
-                            st.session_state[pri_key] = 1
-                    with c1:
-                        lbl = f"{row['name']} {T.get('item_slider_suffix', '')}"
-                        if st.session_state[mand_key]:
-                            st.caption("✅ " + T.get("item_slider_caption_mandatory", "Must have (Cannot be excluded)"))
-                        st.slider(lbl, 0, 10, key=pri_key, on_change=_mark_manual, args=(pri_key,))
-                    with c2:
-                        st.number_input(T.get("lbl_mc", "Monthly $"), min_value=0, key=mc_key, on_change=_mark_manual, args=(mc_key,))
-                    with c3:
-                        st.number_input(T.get("lbl_ic", "Initial $"), min_value=0, key=ic_key, on_change=_mark_manual, args=(ic_key,))
