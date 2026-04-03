@@ -132,6 +132,149 @@ def _build_default_items_reference() -> str:
     )
 
 
+CANONICAL_CATEGORIES = ("transport", "living", "wellbeing", "leisure", "learning")
+
+_CATEGORY_ALIAS_TO_CANONICAL = {
+    # transport
+    "transport": "transport",
+    "transportation": "transport",
+    "mobility": "transport",
+    "commute": "transport",
+    "commuting": "transport",
+    "car": "transport",
+    "bike": "transport",
+    "bicycle": "transport",
+    "transit": "transport",
+    "travel": "transport",
+    "traffic": "transport",
+    "rideshare": "transport",
+    "uber": "transport",
+    "taxi": "transport",
+    "moving": "transport",
+    "移動": "transport",
+    "交通": "transport",
+    # living
+    "living": "living",
+    "life": "living",
+    "lifestyle": "living",
+    "housing": "living",
+    "house": "living",
+    "home": "living",
+    "household": "living",
+    "rent": "living",
+    "utilities": "living",
+    "food": "living",
+    "meal": "living",
+    "meals": "living",
+    "dining": "living",
+    "生活": "living",
+    "住居": "living",
+    # wellbeing
+    "wellbeing": "wellbeing",
+    "well-being": "wellbeing",
+    "wellness": "wellbeing",
+    "health": "wellbeing",
+    "healthy": "wellbeing",
+    "fitness": "wellbeing",
+    "exercise": "wellbeing",
+    "mental health": "wellbeing",
+    "self care": "wellbeing",
+    "self-care": "wellbeing",
+    "medical": "wellbeing",
+    "healthcare": "wellbeing",
+    "care": "wellbeing",
+    "relaxation": "wellbeing",
+    "健康": "wellbeing",
+    "ウェルビーイング": "wellbeing",
+    # leisure
+    "leisure": "leisure",
+    "hobby": "leisure",
+    "hobbies": "leisure",
+    "entertainment": "leisure",
+    "fun": "leisure",
+    "recreation": "leisure",
+    "social": "leisure",
+    "socializing": "leisure",
+    "community": "leisure",
+    "culture": "leisure",
+    "play": "leisure",
+    "games": "leisure",
+    "music": "leisure",
+    "movie": "leisure",
+    "movies": "leisure",
+    "streaming": "leisure",
+    "休暇": "leisure",
+    "余暇": "leisure",
+    "娯楽": "leisure",
+    "趣味": "leisure",
+    # learning
+    "learning": "learning",
+    "learn": "learning",
+    "education": "learning",
+    "study": "learning",
+    "skill": "learning",
+    "skills": "learning",
+    "course": "learning",
+    "courses": "learning",
+    "training": "learning",
+    "development": "learning",
+    "growth": "learning",
+    "reading": "learning",
+    "books": "learning",
+    "certification": "learning",
+    "学習": "learning",
+    "教育": "learning",
+    "勉強": "learning",
+    "スキル": "learning",
+}
+
+
+def _normalize_category(raw_category: object, fallback: str = "leisure") -> str:
+    if not isinstance(raw_category, str):
+        return fallback
+
+    normalized = " ".join(
+        raw_category.strip().lower().replace("_", " ").replace("-", " ").split()
+    )
+    if not normalized:
+        return fallback
+
+    if normalized in CANONICAL_CATEGORIES:
+        return normalized
+
+    alias_match = _CATEGORY_ALIAS_TO_CANONICAL.get(normalized)
+    if alias_match:
+        return alias_match
+
+    keyword_map = {
+        "transport": ("transport", "commute", "mobility", "ride", "車", "交通", "移動"),
+        "living": ("living", "home", "house", "rent", "food", "meal", "生活", "住居"),
+        "wellbeing": ("well", "health", "fitness", "care", "mental", "健康"),
+        "leisure": ("leisure", "hobby", "entertain", "social", "fun", "余暇", "娯楽", "趣味"),
+        "learning": ("learn", "study", "education", "skill", "growth", "学習", "教育", "勉強"),
+    }
+    for canonical, keywords in keyword_map.items():
+        if any(k in normalized for k in keywords):
+            return canonical
+
+    return fallback
+
+
+def _normalize_profile_payload(result: object) -> object:
+    if not isinstance(result, dict):
+        return result
+
+    actions = result.get("recommended_actions")
+    if not isinstance(actions, list):
+        return result
+
+    for item in actions:
+        if isinstance(item, dict):
+            item["category"] = _normalize_category(item.get("category"))
+
+    return result
+
+
 def infer_weights_from_survey(
     lifestyle_data: dict,
     financial_data: dict,
@@ -363,6 +506,14 @@ Before finalizing each recommendation, pass all gates:
 3. **Situational Specificity**: Specific to user context (location/career/lifestyle), not reusable for anyone.
 If any gate fails, regenerate the item.
 
+### 4C. CATEGORY CONSTRAINT (STRICT)
+For every item in recommended_actions, category MUST be one of:
+["transport", "living", "wellbeing", "leisure", "learning"]
+
+Do NOT use any other labels (e.g., wellness, health, hobby, passion, growth, social, entertainment).
+If unsure, map to the nearest valid category above.
+Any item with an invalid category is considered a failed output.
+
 ### 5. VOICE & TONE GUIDELINES
 - **Persona Title**: Inspiring (e.g., "The Strategic Voyager," "Architect of Dreams").
 - **Psychological Conflict**: Be empathetic. Frame it as "bridging the gap between heart and wisdom."
@@ -502,6 +653,7 @@ Use these items as reference for cost adjustment (if applicable):
         
         try:
             result = json.loads(json_str)
+            result = _normalize_profile_payload(result)
             return result
         except json.JSONDecodeError as e:
             print(f"⚠️  JSON decode error: {e}")
@@ -509,6 +661,7 @@ Use these items as reference for cost adjustment (if applicable):
             json_str_fixed = json_str + "}" * 5  # Add closing braces to close
             try:
                 result = json.loads(json_str_fixed)
+                result = _normalize_profile_payload(result)
                 print(f"✅ Fixed JSON by adding closing braces")
                 return result
             except:
