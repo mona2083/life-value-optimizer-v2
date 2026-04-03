@@ -1,5 +1,5 @@
 import streamlit as st
-from ui.logic import apply_dynamic_overrides, apply_food_overrides
+from ui.logic import apply_dynamic_overrides, apply_food_overrides, normalize_all_item_costs
 from llm import (
     food_weight_from_jelly,
     get_user_profile,
@@ -409,6 +409,8 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
                                     "category": cat_key,
                                     "initial_cost": item.get("initial_cost", 0),
                                     "monthly_cost": item.get("monthly_cost", 0),
+                                    "base_initial_cost": item.get("initial_cost", 0),
+                                    "base_monthly_cost": item.get("monthly_cost", 0),
                                     "health": item.get("health", 5),
                                     "connections": item.get("connections", 5),
                                     "freedom": item.get("freedom", 5),
@@ -439,7 +441,11 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
                             if mask.any():
                                 df.loc[mask, "initial_cost"] = adj_initial
                                 df.loc[mask, "monthly_cost"] = adj_monthly
+                                df.loc[mask, "base_initial_cost"] = adj_initial
+                                df.loc[mask, "base_monthly_cost"] = adj_monthly
                                 st.session_state.category_dfs[cat_key] = df
+
+                    normalize_all_item_costs(financial_data)
                     
                     # Only rerun if we just added AI items for the first time
                     if not st.session_state.get("ai_items_added_from_insight", False):
@@ -459,6 +465,7 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
                         food_data=food_data,
                     )
                     _apply_weights_to_sliders(fallback)
+                    normalize_all_item_costs(financial_data)
                     st.warning(T.get("analysis_fallback", ""))
             else:
                 fallback = infer_weights_from_survey(
@@ -469,6 +476,7 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
                     food_data=food_data,
                 )
                 _apply_weights_to_sliders(fallback)
+                normalize_all_item_costs(financial_data)
                 st.info(T.get("analysis_manual_mode", "Reflected values based on answers without using AI."))
 
     if st.session_state.get("ai_insight"):

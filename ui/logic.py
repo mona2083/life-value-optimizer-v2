@@ -2,6 +2,122 @@ import streamlit as st
 import pandas as pd
 from default_items import CATEGORIES, DEFAULT_ITEMS
 
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clip(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def _build_item_cost_context(financial_data: dict) -> dict:
+    profile = (financial_data or {}).get("user_profile", {}) or {}
+
+    monthly_budget = max(0.0, _safe_float((financial_data or {}).get("monthly_budget", 0), 0.0))
+    initial_budget = max(0.0, _safe_float((financial_data or {}).get("initial_budget", 0), 0.0))
+    adults = max(0, int(_safe_float(profile.get("household_adults", 1), 1)))
+    children = max(0, int(_safe_float(profile.get("household_children", 0), 0)))
+    infants = max(0, int(_safe_float(profile.get("household_infants", 0), 0)))
+
+    adult_equivalent = adults + (0.6 * children) + (0.4 * infants)
+    budget_factor_monthly = _clip((monthly_budget / 1500.0) ** 0.5 if monthly_budget > 0 else 0.75, 0.75, 1.40)
+    budget_factor_initial = _clip((initial_budget / 5000.0) ** 0.5 if initial_budget > 0 else 0.70, 0.70, 1.60)
+    household_factor = _clip(1.0 + (0.18 * (adult_equivalent - 1.0)), 0.85, 1.70)
+
+    category_monthly_factor = {
+        "transport": 1.10,
+        "living": 1.00,
+        "wellbeing": 1.00,
+        "leisure": 0.95,
+        "learning": 0.90,
+    }
+    category_initial_factor = {
+        "transport": 1.20,
+        "living": 1.00,
+        "wellbeing": 1.00,
+        "leisure": 0.90,
+        "learning": 1.05,
+    }
+
+    return {
+        "monthly_budget": monthly_budget,
+        "initial_budget": initial_budget,
+        "budget_factor_monthly": budget_factor_monthly,
+        "budget_factor_initial": budget_factor_initial,
+        "household_factor": household_factor,
+        "category_monthly_factor": category_monthly_factor,
+        "category_initial_factor": category_initial_factor,
+    }
+
+
+def _normalize_item_costs(initial_cost, monthly_cost, category: str, source: str, ctx: dict) -> tuple[int, int]:
+    base_initial = max(0.0, _safe_float(initial_cost, 0.0))
+    base_monthly = max(0.0, _safe_float(monthly_cost, 0.0))
+
+    cat_init = ctx["category_initial_factor"].get(category, 1.0)
+    cat_month = ctx["category_monthly_factor"].get(category, 1.0)
+    multiplier_initial = ctx["budget_factor_initial"] * ctx["household_factor"] * cat_init
+    multiplier_monthly = ctx["budget_factor_monthly"] * ctx["household_factor"] * cat_month
+
+    normalized_initial = base_initial * multiplier_initial
+    normalized_monthly = base_monthly * multiplier_monthly
+
+    blend_weight = 0.45 if source == "default" else 0.75
+    final_initial = (base_initial * (1.0 - blend_weight)) + (normalized_initial * blend_weight)
+    final_monthly = (base_monthly * (1.0 - blend_weight)) + (normalized_monthly * blend_weight)
+
+    monthly_cap = max(100.0, ctx["monthly_budget"] * 0.90)
+    initial_cap = max(200.0, ctx["initial_budget"] * 0.90)
+
+    final_initial = _clip(final_initial, 0.0, initial_cap)
+    final_monthly = _clip(final_monthly, 0.0, monthly_cap)
+    return int(round(final_initial)), int(round(final_monthly))
+
+
+def normalize_all_item_costs(financial_data: dict, debug: bool = False) -> None:
+    if not hasattr(st.session_state, "category_dfs"):
+        return
+
+    ctx = _build_item_cost_context(financial_data)
+    for cat, df in st.session_state.category_dfs.items():
+        if df is None or df.empty:
+            continue
+
+        if "base_initial_cost" not in df.columns:
+            df["base_initial_cost"] = df["initial_cost"].fillna(0).astype("float64")
+        if "base_monthly_cost" not in df.columns:
+            df["base_monthly_cost"] = df["monthly_cost"].fillna(0).astype("float64")
+
+        for idx, row in df.iterrows():
+            source = row.get("source", "default")
+            base_ic = row.get("base_initial_cost", row.get("initial_cost", 0))
+            base_mc = row.get("base_monthly_cost", row.get("monthly_cost", 0))
+            norm_ic, norm_mc = _normalize_item_costs(base_ic, base_mc, cat, source, ctx)
+
+            df.at[idx, "initial_cost"] = norm_ic
+            df.at[idx, "monthly_cost"] = norm_mc
+
+            initial_state_key = f"initial_cost_{cat}_{idx}"
+            monthly_state_key = f"monthly_cost_{cat}_{idx}"
+            if not st.session_state.get(f"manual_{initial_state_key}", False):
+                st.session_state[initial_state_key] = norm_ic
+            if not st.session_state.get(f"manual_{monthly_state_key}", False):
+                st.session_state[monthly_state_key] = norm_mc
+
+            if debug and (norm_ic != int(_safe_float(base_ic, 0)) or norm_mc != int(_safe_float(base_mc, 0))):
+                print(
+                    f"[item-normalize] cat={cat} source={source} idx={idx} "
+                    f"ic:{int(_safe_float(base_ic, 0))}->{norm_ic} mc:{int(_safe_float(base_mc, 0))}->{norm_mc}"
+                )
+
+        st.session_state.category_dfs[cat] = df
+
 def dict_get_or_zero(d, key):
     """Safely get a float value from a dictionary, defaulting to 0.0 if not found or None."""
     res = (d or {}).get(key, 0)
@@ -125,6 +241,8 @@ def init_category_dfs():
         # Ensure primitive types for seamless frontend/backend integration
         df["initial_cost"] = df["initial_cost"].fillna(0).astype("float64")
         df["monthly_cost"] = df["monthly_cost"].fillna(0).astype("float64")
+        df["base_initial_cost"] = df["initial_cost"]
+        df["base_monthly_cost"] = df["monthly_cost"]
         df["priority"] = df["priority"].fillna(3).astype("int64")
         df["mandatory"] = df["mandatory"].fillna(False).astype("bool")
         if "source" not in df.columns:

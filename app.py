@@ -14,6 +14,15 @@ from core.models import UserProfile, FoodData, FoodEstimate
 from state.session import SessionState
 from ai.profile_extractor import ProfileExtractor
 
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
 # =====================================================================
 # Initialization and State Management
 # =====================================================================
@@ -172,6 +181,21 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
             mid_level_cost = (minimalist_floor + monthly_food_cost) / 2
             food_stage1_max = int(max(0, mid_level_cost - minimalist_floor))
             food_stage2_max = int(max(0, monthly_food_cost - mid_level_cost))
+
+        # Apply budget pressure only to variable food bands.
+        # Keep minimalist_floor as-is to preserve minimum nutrition baseline.
+        monthly_budget_raw = float(financial_data.get("monthly_budget", 0) or 0)
+        monthly_food_cost = float(food_info.get("monthly_food_cost", minimalist_floor) or minimalist_floor)
+        if monthly_food_cost > 0:
+            budget_pressure = monthly_budget_raw / monthly_food_cost
+        else:
+            budget_pressure = 1.0
+        budget_pressure = max(0.6, min(1.4, budget_pressure))
+
+        stage1_scale = 0.85 + (0.15 * budget_pressure)
+        stage2_scale = budget_pressure ** 1.25
+        food_stage1_max = int(max(0, round(food_stage1_max * stage1_scale)))
+        food_stage2_max = int(max(0, round(food_stage2_max * stage2_scale)))
         
         base_monthly_after_food = max(
             0,
@@ -222,6 +246,9 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                 mand = st.session_state.get(f"mandatory_{cat}_{idx}", row["mandatory"])
                 ic = st.session_state.get(f"initial_cost_{cat}_{idx}", row["initial_cost"])
                 mc = st.session_state.get(f"monthly_cost_{cat}_{idx}", row["monthly_cost"])
+                source = row.get("source", "default")
+                safe_ic = int(max(0, _safe_float(ic, 0)))
+                safe_mc = int(max(0, _safe_float(mc, 0)))
                 
                 # 優先度0は除外。ただし必須指定は候補に残す
                 if pri > 0 or mand:
@@ -233,13 +260,13 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                         "category": cat,
                         "priority": pri,
                         "mandatory": mand,
-                        "initial_cost": int(ic),  # Ensure integer
-                        "monthly_cost": int(mc),  # Ensure integer
+                        "initial_cost": safe_ic,
+                        "monthly_cost": safe_mc,
                         "health": row["health"],
                         "connections": row["connections"],
                         "freedom": row["freedom"],
                         "growth": row["growth"],
-                        "source": row.get("source", "default")  # Preserve source field
+                        "source": source  # Preserve source field
                     })
 
         result = None
