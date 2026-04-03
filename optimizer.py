@@ -1,6 +1,14 @@
 from ortools.sat.python import cp_model
 
 
+def _metric_int(item: dict, key: str, default: int = 0) -> int:
+    value = item.get(key, default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def food_related_score(item: dict) -> int:
     """
     食生活に結びつきやすいアイテムほど高いスコア（0〜20程度）。
@@ -50,12 +58,35 @@ def _base_utility(item: dict, weights: dict) -> int:
     fr = food_related_score(item)
     food_term = fw * (fr + 10) * 40
     return (
-        weights["health"]      * (int(item["health"]) + 10)      * 100 +
-        weights["connections"] * (int(item["connections"]) + 10) * 100 +
-        weights["freedom"]     * (int(item["freedom"]) + 10)     * 100 +
-        weights["growth"]      * (int(item["growth"]) + 10)      * 100
+        weights["health"]      * (_metric_int(item, "health", 0) + 10)      * 100 +
+        weights["connections"] * (_metric_int(item, "connections", 0) + 10) * 100 +
+        weights["freedom"]     * (_metric_int(item, "freedom", 0) + 10)     * 100 +
+        weights["growth"]      * (_metric_int(item, "growth", 0) + 10)      * 100
         + food_term
     )
+
+
+def _satisfaction_item_score(item: dict, weights: dict) -> int:
+    # Satisfaction is source-agnostic (default/AI) and treats missing metrics as neutral (0).
+    h = max(0, _metric_int(item, "health", 0) + 10)
+    c = max(0, _metric_int(item, "connections", 0) + 10)
+    f = max(0, _metric_int(item, "freedom", 0) + 10)
+    g = max(0, _metric_int(item, "growth", 0) + 10)
+    score = (
+        int(weights.get("health", 5)) * h * 15
+        + int(weights.get("connections", 5)) * c * 15
+        + int(weights.get("freedom", 5)) * f * 15
+        + int(weights.get("growth", 5)) * g * 15
+    )
+
+    # Transport is a single-choice category, so reflect lived-experience fit more strongly.
+    if (item.get("category", "") or "") == "transport":
+        score += (
+            int(weights.get("freedom", 5)) * f * 18
+            + int(weights.get("connections", 5)) * c * 14
+        )
+
+    return score
 
 def run_optimizer(
     items: list[dict],
@@ -78,7 +109,11 @@ def run_optimizer(
     n = len(candidates)
     priority_weights_int = [int(w * 100) for w in _calc_priority_weights(candidates)]
     base_utils           = [_base_utility(item, weights) for item in candidates]
-    utilities            = [(base_utils[i] * priority_weights_int[i]) // 100 for i in range(n)]
+    utilities            = [
+        ((base_utils[i] * priority_weights_int[i]) // 100)
+        + int(candidates[i].get("soft_bonus", 0) or 0)
+        for i in range(n)
+    ]
 
     model = cp_model.CpModel()
     x     = [model.NewBoolVar(f"x_{i}") for i in range(n)]
@@ -124,6 +159,8 @@ def run_optimizer(
             model.Add(x[ci] <= sum(x[i] for i in car_primary_idx)) if car_primary_idx else model.Add(x[ci] == 0)
 
     items_value = sum(x[i] * utilities[i] for i in range(n))
+    satisfaction_scores = [_satisfaction_item_score(item, weights) for item in candidates]
+    satisfaction_items_value = sum(x[i] * satisfaction_scores[i] for i in range(n))
 
     total_monthly_cost_var = model.NewIntVar(0, monthly_budget, "total_monthly_cost")
     # Convert costs to integers to avoid float constraint issue
@@ -164,7 +201,7 @@ def run_optimizer(
     # Low weight: Fulfill if possible / High weight: Fulfill with top priority
     _fw_norm = (food_weight - 1) / 9.0  # 0.0 .. 1.0
     FOOD_STAGE1_VALUE_PER_DOLLAR = int(80 + 560 * _fw_norm)  # 80 .. 640
-    FOOD_STAGE2_VALUE_PER_DOLLAR_BASE = 32  # Stage2は食の重みに比例
+    FOOD_STAGE2_VALUE_PER_DOLLAR_BASE = 24  # Stage2は食の重みに比例
 
     food_stage1_value_var = model.NewIntVar(
         0,
@@ -234,8 +271,10 @@ def run_optimizer(
     # =====================================================================
     # Update Objective Function: Maximize (Total Utility + Savings Value - Total Penalty)
     # =====================================================================
+    satisfaction_weight = 3
     model.Maximize(
         items_value
+        + (satisfaction_items_value * satisfaction_weight)
         + savings_value
         + food_stage1_value_var
         + food_stage2_value_var
@@ -259,6 +298,7 @@ def run_optimizer(
             "selected":              selected,
             "total_initial_cost":    total_initial,
             "total_monthly_cost":    total_monthly,
+            "satisfaction_score":    sum(_satisfaction_item_score(item, weights) for item in selected),
             "food_stage1_monthly_cost": solver.Value(food_stage1_var),
             "food_stage2_monthly_cost": solver.Value(food_stage2_var),
             "food_stage1_deficit": solver.Value(food_stage1_deficit_var),

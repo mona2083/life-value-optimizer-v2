@@ -49,7 +49,7 @@ DEFAULT_ITEMS = [
     {"id": "default_transport_car_share_bicycle", "category": "transport", "priority": 3,
      "name_ja": "カーシェア＋自転車", "name_en": "Car Share + Bicycle",
      "initial_cost": 500, "monthly_cost": 130,
-     "health": 6, "connections": 3, "freedom": 5, "growth": 3,
+        "health": 6, "connections": 2, "freedom": 3, "growth": 3,
      "note_ja": "カーシェア$100＋自転車維持$30", "note_en": "Car share$100 + Bicycle upkeep$30"},
     {"id": "default_transport_ebike_uber", "category": "transport", "priority": 4,
      "name_ja": "電動自転車＋Uber", "name_en": "E-Bike + Uber",

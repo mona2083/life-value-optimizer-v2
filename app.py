@@ -23,6 +23,10 @@ def _safe_float(value, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return default
 
+
+def _safe_metric_int(value, default: int = 0) -> int:
+    return int(round(_safe_float(value, float(default))))
+
 # =====================================================================
 # Initialization and State Management
 # =====================================================================
@@ -239,6 +243,8 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
 
         # 最適化エンジンに渡す全候補アイテムのリストを構築
         candidates = []
+        prefer_car_soft_bonus = bool(st.session_state.get("prefer_car_soft_bonus", False))
+        prefer_car_soft_bonus_value = int(st.session_state.get("prefer_car_soft_bonus_value", 30000) or 0)
         for cat, df in st.session_state.category_dfs.items():
             for idx, row in df.iterrows():
                 # UI側のセッションステート（スライダー等の値）から最新の状態を取得
@@ -252,6 +258,14 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                 
                 # 優先度0は除外。ただし必須指定は候補に残す
                 if pri > 0 or mand:
+                    soft_bonus = 0
+                    if (
+                        prefer_car_soft_bonus
+                        and cat == "transport"
+                        and (row.get("name_ja") == "車メイン" or row.get("name_en") == "Car (Primary)")
+                    ):
+                        soft_bonus = max(0, prefer_car_soft_bonus_value)
+
                     candidates.append({
                         "id": f"{cat}_{idx}",
                         "name": row["name"],
@@ -262,11 +276,12 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                         "mandatory": mand,
                         "initial_cost": safe_ic,
                         "monthly_cost": safe_mc,
-                        "health": row["health"],
-                        "connections": row["connections"],
-                        "freedom": row["freedom"],
-                        "growth": row["growth"],
-                        "source": source  # Preserve source field
+                        "health": _safe_metric_int(row.get("health", 0), 0),
+                        "connections": _safe_metric_int(row.get("connections", 0), 0),
+                        "freedom": _safe_metric_int(row.get("freedom", 0), 0),
+                        "growth": _safe_metric_int(row.get("growth", 0), 0),
+                        "source": source,  # Preserve source field
+                        "soft_bonus": soft_bonus,
                     })
 
         result = None
@@ -301,6 +316,15 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                     require_transport=require_transport,
                 )
 
+            def _surplus_car_bonus_delta(surplus_value: float) -> int:
+                if surplus_value > 600:
+                    return 15000
+                if surplus_value > 300:
+                    return 10000
+                if surplus_value > 100:
+                    return 5000
+                return 0
+
             mandatory_ids = [c["id"] for c in candidates if c.get("mandatory")]
             working = candidates
             mandatory_relaxed_applied = False
@@ -327,6 +351,53 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                 result = _run_opt(working, 0, 0, False)
                 if result.get("status") == "ok":
                     result["best_effort_transport_optional"] = True
+
+            if result.get("status") == "ok" and prefer_car_soft_bonus:
+                if result.get("best_effort_transport_optional"):
+                    current_fs1_cap = 0
+                    current_fs2_cap = 0
+                    current_require_transport = False
+                elif result.get("best_effort_zero_food_stages"):
+                    current_fs1_cap = 0
+                    current_fs2_cap = 0
+                    current_require_transport = True
+                else:
+                    current_fs1_cap = food_stage1_max
+                    current_fs2_cap = food_stage2_max
+                    current_require_transport = True
+
+                actual_savings_now = float(result.get("actual_monthly_savings", 0) or 0)
+                stage1_used_now = float(result.get("food_stage1_monthly_cost", 0) or 0)
+                stage1_unfilled = max(0.0, float(current_fs1_cap) - stage1_used_now)
+                surplus_value = actual_savings_now - float(tms) - stage1_unfilled
+                extra_bonus = _surplus_car_bonus_delta(surplus_value)
+
+                if extra_bonus > 0:
+                    boosted_working = []
+                    for item in working:
+                        it = dict(item)
+                        if (
+                            it.get("category") == "transport"
+                            and (it.get("name_ja") == "車メイン" or it.get("name_en") == "Car (Primary)")
+                        ):
+                            it["soft_bonus"] = int(it.get("soft_bonus", 0) or 0) + extra_bonus
+                        boosted_working.append(it)
+
+                    boosted_result = _run_opt(
+                        boosted_working,
+                        current_fs1_cap,
+                        current_fs2_cap,
+                        current_require_transport,
+                    )
+                    if boosted_result.get("status") == "ok":
+                        if result.get("best_effort_zero_food_stages"):
+                            boosted_result["best_effort_zero_food_stages"] = True
+                        if result.get("best_effort_transport_optional"):
+                            boosted_result["best_effort_transport_optional"] = True
+                        result = boosted_result
+                        working = boosted_working
+                        result["car_surplus_bonus_applied"] = extra_bonus
+                        result["car_surplus_value"] = surplus_value
 
             if (
                 result.get("status") == "ok"

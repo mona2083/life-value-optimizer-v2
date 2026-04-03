@@ -269,14 +269,21 @@ def apply_dynamic_overrides(lifestyle_data):
     q1a = lifestyle_data.get("car_necessity", "")
     if "A:" in q1a:
         # Mandatory requirement
+        st.session_state["prefer_car_soft_bonus"] = False
+        st.session_state["prefer_car_soft_bonus_value"] = 0
         set_val("transport", "車メイン", "mandatory", True)
         set_val("transport", "車メイン", "priority", 5)
     elif "B:" in q1a:
-        # Optional requirement
+        # Optional but preferred
+        st.session_state["prefer_car_soft_bonus"] = True
+        # Objective utilities are scaled to ~10^4 order per item, so this needs to be large enough.
+        st.session_state["prefer_car_soft_bonus_value"] = 30000
         set_val("transport", "車メイン", "mandatory", False)
-        set_val("transport", "車メイン", "priority", 3) 
+        set_val("transport", "車メイン", "priority", 6)
     elif "C:" in q1a:
         # Excluded
+        st.session_state["prefer_car_soft_bonus"] = False
+        st.session_state["prefer_car_soft_bonus_value"] = 0
         set_val("transport", "車メイン", "mandatory", False)
         set_val("transport", "車メイン", "priority", 0)
         
@@ -290,6 +297,9 @@ def apply_dynamic_overrides(lifestyle_data):
         set_val("transport", "カーシェア＋自転車", "initial_cost", 0)
     if lifestyle_data.get("own_moto"):
         set_val("transport", "バイクメイン", "initial_cost", 0)
+        set_val("transport", "バイクメイン", "priority", 4)
+    else:
+        set_val("transport", "バイクメイン", "priority", 0)
 
     # Q3: Work style
     q2 = lifestyle_data.get("work_style", "")

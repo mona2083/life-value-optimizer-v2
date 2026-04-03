@@ -51,10 +51,6 @@ def _build_item_group_stats(selected, category_keys, lang: str) -> dict:
 
 
 def _render_item_group_breakdown(selected, lang: str) -> None:
-    group_specs = [
-        ("transport", ["transport"]),
-        ("others", ["living", "wellbeing", "leisure", "learning"]),
-    ]
     group_labels = {
         "transport": "🚗 移動・交通" if lang == "ja" else "🚗 Transport",
         "others": "📚 それ以外のカテゴリ" if lang == "ja" else "📚 Other categories",
@@ -65,40 +61,47 @@ def _render_item_group_breakdown(selected, lang: str) -> None:
         "ai": "AI提案" if lang == "ja" else "AI Proposed",
         "rate": "選択率" if lang == "ja" else "Rate",
         "no_items": "対象アイテムはありません" if lang == "ja" else "No items in this group",
+        "not_selected": "未選択" if lang == "ja" else "Not selected",
+        "selected_method": "選択手段" if lang == "ja" else "Selected method",
     }
 
+    others_stats = _build_item_group_stats(selected, ["living", "wellbeing", "leisure", "learning"], lang)
+    transport_selected = [it for it in selected if it.get("category") == "transport"]
+    transport_names = []
+    for item in transport_selected:
+        name = item.get("name_ja") if lang == "ja" else item.get("name_en")
+        transport_names.append(name or item.get("name") or "")
+
     col_left, col_right = st.columns([4, 6])
-    for col, (group_key, category_keys) in zip((col_left, col_right), group_specs):
-        stats = _build_item_group_stats(selected, category_keys, lang)
-        rate_text = f"{stats['selection_rate']:.1f}%" if stats["total_available"] > 0 else "-"
 
-        with col:
-            with st.container(border=True):
-                st.markdown(f"**{group_labels[group_key]}**")
-                if group_key == "transport":
-                    metric1, metric2, metric3 = st.columns(3)
-                    with metric1:
-                        st.metric(metric_labels["selected"], f"{stats['selected_count']}/{stats['total_available']}")
-                    with metric2:
-                        st.metric(metric_labels["default"], f"{stats['default_selected_count']}/{stats['default_available']}")
-                    with metric3:
-                        st.metric(metric_labels["ai"], f"{stats['ai_selected_count']}/{stats['ai_available']}")
-                else:
-                    metric1, metric2, metric3, metric4 = st.columns(4)
-                    with metric1:
-                        st.metric(metric_labels["selected"], f"{stats['selected_count']}/{stats['total_available']}")
-                    with metric2:
-                        st.metric(metric_labels["default"], f"{stats['default_selected_count']}/{stats['default_available']}")
-                    with metric3:
-                        st.metric(metric_labels["ai"], f"{stats['ai_selected_count']}/{stats['ai_available']}")
-                    with metric4:
-                        st.metric(metric_labels["rate"], rate_text)
+    with col_left:
+        with st.container(border=True):
+            st.markdown(f"**{group_labels['transport']}**")
+            if transport_names:
+                st.markdown(f"**{metric_labels['selected_method']}**")
+                st.markdown("\n".join([f"- {name}" for name in transport_names]))
+            else:
+                st.caption(metric_labels["not_selected"])
 
-                st.divider()
-                if stats["breakdown_lines"]:
-                    st.markdown("\n".join(stats["breakdown_lines"]))
-                else:
-                    st.caption(metric_labels["no_items"])
+    with col_right:
+        with st.container(border=True):
+            st.markdown(f"**{group_labels['others']}**")
+            rate_text = f"{others_stats['selection_rate']:.1f}%" if others_stats["total_available"] > 0 else "-"
+            metric1, metric2, metric3, metric4 = st.columns(4)
+            with metric1:
+                st.metric(metric_labels["selected"], f"{others_stats['selected_count']}/{others_stats['total_available']}")
+            with metric2:
+                st.metric(metric_labels["default"], f"{others_stats['default_selected_count']}/{others_stats['default_available']}")
+            with metric3:
+                st.metric(metric_labels["ai"], f"{others_stats['ai_selected_count']}/{others_stats['ai_available']}")
+            with metric4:
+                st.metric(metric_labels["rate"], rate_text)
+
+            st.divider()
+            if others_stats["breakdown_lines"]:
+                st.markdown("\n".join(others_stats["breakdown_lines"]))
+            else:
+                st.caption(metric_labels["no_items"])
 
 def render_risk_and_results(
     result,
@@ -279,43 +282,8 @@ def render_risk_and_results(
 
     # アイテム選択カウント表示
     if selected:
-        # source フィールドを使ってデフォルト vs AI/ユーザーアイテムを分別
-        default_selected = [it for it in selected if it.get("source") == "default"]
-        ai_or_user_selected = [it for it in selected if it.get("source") != "default"]
-        
-        # 全体のカウント
-        total_selected = len(selected)
-        default_count_selected = len(default_selected)
-        ai_count_selected = len(ai_or_user_selected)
-        
-        # デフォルト総数とAI/ユーザーアイテム総数
-        total_default_items = len(DEFAULT_ITEMS)
-        
-        # 全体の選択率
-        if hasattr(st.session_state, 'category_dfs'):
-            total_ai_or_user_items = sum(len([idx for idx, row in dfs.iterrows() if row.get("source") != "default"]) 
-                                          for dfs in st.session_state.category_dfs.values())
-        else:
-            total_ai_or_user_items = ai_count_selected
-        
-        total_available = total_default_items + total_ai_or_user_items
-        selection_rate = (total_selected / total_available * 100) if total_available > 0 else 0
-        
         with st.container(border=True):
             st.markdown(f"**📦 {'アイテム選択数' if lang == 'ja' else 'Selected Items'} / 📊 {'カテゴリ別内訳' if lang == 'ja' else 'Category Breakdown'}**")
-            
-            # Summary row (4 metrics)
-            cell1, cell2, cell3, cell4 = st.columns([1, 1.2, 1.2, 1])
-            with cell1:
-                st.metric("選択数" if lang == "ja" else "Selected", f"{total_selected}")
-            with cell2:
-                st.metric("デフォルト" if lang == "ja" else "Default", f"{default_count_selected}/{total_default_items}") 
-            with cell3:
-                st.metric("AI提案" if lang == "ja" else "AI Proposed", f"{ai_count_selected}/{total_ai_or_user_items}")
-            with cell4:
-                st.metric("選択率" if lang == "ja" else "Rate", f"{selection_rate:.1f}%")
-            
-            st.divider()
             _render_item_group_breakdown(selected, lang)
 
 
@@ -847,43 +815,8 @@ def render_risk_and_results(
 
     # アイテム選択カウント表示
     if selected:
-        # source フィールドを使ってデフォルト vs AI/ユーザーアイテムを分別
-        default_selected = [it for it in selected if it.get("source") == "default"]
-        ai_or_user_selected = [it for it in selected if it.get("source") != "default"]
-        
-        # 全体のカウント
-        total_selected = len(selected)
-        default_count_selected = len(default_selected)
-        ai_count_selected = len(ai_or_user_selected)
-        
-        # デフォルト総数とAI/ユーザーアイテム総数
-        total_default_items = len(DEFAULT_ITEMS)
-        
-        # 全体の選択率
-        if hasattr(st.session_state, 'category_dfs'):
-            total_ai_or_user_items = sum(len([idx for idx, row in dfs.iterrows() if row.get("source") != "default"]) 
-                                          for dfs in st.session_state.category_dfs.values())
-        else:
-            total_ai_or_user_items = ai_count_selected
-        
-        total_available = total_default_items + total_ai_or_user_items
-        selection_rate = (total_selected / total_available * 100) if total_available > 0 else 0
-        
         with st.container(border=True):
             st.markdown(f"**📦 {'アイテム選択数' if lang == 'ja' else 'Selected Items'} / 📊 {'カテゴリ別内訳' if lang == 'ja' else 'Category Breakdown'}**")
-            
-            # Summary row (4 metrics)
-            cell1, cell2, cell3, cell4 = st.columns([1, 1.2, 1.2, 1])
-            with cell1:
-                st.metric("選択数" if lang == "ja" else "Selected", f"{total_selected}")
-            with cell2:
-                st.metric("デフォルト" if lang == "ja" else "Default", f"{default_count_selected}/{total_default_items}") 
-            with cell3:
-                st.metric("AI提案" if lang == "ja" else "AI Proposed", f"{ai_count_selected}/{total_ai_or_user_items}")
-            with cell4:
-                st.metric("選択率" if lang == "ja" else "Rate", f"{selection_rate:.1f}%")
-            
-            st.divider()
             _render_item_group_breakdown(selected, lang)
 
     # AI Life Coach Dashboard (inserted between budget summary and category breakdown)
