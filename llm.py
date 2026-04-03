@@ -54,6 +54,84 @@ def food_weight_from_jelly(q_jelly: str | None) -> int:
     return max(1, min(10, int(v)))
 
 
+def _build_default_item_avoidance_block() -> str:
+    """
+    Build a compact prompt block that tells the LLM which default items to avoid
+    or treat as off-limits for recommendation generation.
+    """
+    grouped = {}
+    for item in DEFAULT_ITEMS:
+        grouped.setdefault(item.get("category", "other"), []).append(item)
+
+    category_labels = {
+        "transport": "transport",
+        "living": "living",
+        "wellbeing": "wellbeing",
+        "leisure": "leisure",
+        "learning": "learning",
+    }
+
+    lines = ["### DEFAULT ITEM AVOIDANCE"]
+    lines.append("Avoid proposing anything that is a renamed, narrowed, or obvious substitute for these default items:")
+
+    for category in ["transport", "living", "wellbeing", "leisure", "learning"]:
+        items = grouped.get(category, [])
+        if not items:
+            continue
+
+        names = []
+        for item in items:
+            name_ja = item.get("name_ja") or ""
+            name_en = item.get("name_en") or ""
+            if name_ja and name_en:
+                names.append(f"{name_en} / {name_ja}")
+            else:
+                names.append(name_en or name_ja)
+
+        lines.append(f"- {category_labels.get(category, category)}: {', '.join(names)}")
+
+    lines.append("Hard rules:")
+    lines.append("- Do NOT return items that are essentially the same purpose as a default item, even if the name is changed.")
+    lines.append("- Do NOT return direct duplicates, close synonyms, or costume changes of default items.")
+    lines.append("- If the obvious idea is already covered by defaults, choose a clearly different angle, context, or life function.")
+    lines.append("- Prefer unique, situation-specific, passion-specific ideas that a default catalog would not already cover.")
+    lines.append("- When in doubt, pick something more distinct rather than more familiar.")
+    lines.append("")
+    lines.append("### OCCUPIED ARCHETYPES (FORBIDDEN FOR GENERIC VARIANTS)")
+    lines.append("- Mobility: Car (Primary), Motorcycle (Primary), Car Share + Bicycle, E-Bike + Uber, Public Transit, Bicycle Only, Uber/Lyft Only")
+    lines.append("- Time-Reclamation: Time-saving Appliances, Housekeeping Service")
+    lines.append("- Body-Maintenance: Gym / Yoga, Massage / Spa / Sauna, Travel / Retreat Fund")
+    lines.append("- Social-Consumption: Coffee / Cafe, Socializing / Drinks, Home Drinks, Fashion / Beauty")
+    lines.append("- Knowledge/Craft: Books / Audible")
+    lines.append("- If a candidate recommendation maps to one of these archetypes as the same life function, reject it and generate a distinct alternative.")
+
+    lines.append("")
+    lines.append("### NEGATIVE EXAMPLES")
+    lines.append("- Bad: 'Inspiration trip fund' -> same life function as Travel / Retreat Fund.")
+    lines.append("- Bad: 'Flexible mobility subscription (car-share/bike-share)' -> same life function as Car Share + Bicycle.")
+    lines.append("- Bad: 'Alternative fitness membership' -> same life function as Gym / Yoga.")
+
+    return "\n".join(lines)
+
+
+def _build_default_items_reference() -> str:
+    """Build a compact JSON reference for prompt grounding."""
+    return json.dumps(
+        [
+            {
+                "id": item.get("id"),
+                "category": item.get("category"),
+                "name_ja": item.get("name_ja"),
+                "name_en": item.get("name_en"),
+                "priority": item.get("priority"),
+            }
+            for item in DEFAULT_ITEMS
+        ],
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
 def infer_weights_from_survey(
     lifestyle_data: dict,
     financial_data: dict,
@@ -269,6 +347,21 @@ Generate EXACTLY 10 personalized RECOMMENDATIONS (NOT in defaults).
 - **Split**: 2 Leisure, 2 Learning, 2 Wellbeing, 4 Passion-specific.
 - **FALLBACK**: If input is short, use templates [Commute, Gym, Skill-up, Hobby, Social, Tools] but LOCALISE them (e.g., 'Gym' in Hawaii -> 'Ocean/Hiking activities').
 - **TONE**: Write 'ai_message' as a mentor. Use: "Given your passion for X, this is the engine for your joy."
+- **NOVELTY RULE**: The 10 recommendations must be meaningfully different from defaults. Do not rename a default item, narrow it slightly, or swap in a near-synonym.
+- **ANTI-DUPLICATION RULE**: If a candidate overlaps with a default item in purpose, use case, or category function, reject it and generate a distinct alternative.
+- **DISTINCTNESS TARGET**: Favor items that are passion-specific, contextual, or experiential rather than generic life-utility items already in the catalog.
+
+### 4A. OCCUPIED ARCHETYPE FILTER
+Treat the following as already-covered functions that must NOT be re-proposed in generic form:
+- Mobility, Time-Reclamation, Body-Maintenance, Social-Consumption, Knowledge/Craft.
+If a draft recommendation is a renamed variant of one of these occupied functions, reject it before output.
+
+### 4B. PER-ITEM SELF-CHECK (MANDATORY)
+Before finalizing each recommendation, pass all gates:
+1. **Passion Match**: Directly tied to user passion/core-value signal, not generic utility.
+2. **Forbidden Archetype Test**: Not a functional substitute for any default item.
+3. **Situational Specificity**: Specific to user context (location/career/lifestyle), not reusable for anyone.
+If any gate fails, regenerate the item.
 
 ### 5. VOICE & TONE GUIDELINES
 - **Persona Title**: Inspiring (e.g., "The Strategic Voyager," "Architect of Dreams").
@@ -327,21 +420,8 @@ JSON Example Structure:
 }}
 """
 
-    # Prepare default items for adjustment
-    default_items_for_prompt = json.dumps(
-        [
-            {
-                "name_ja": item.get("name_ja"),
-                "name_en": item.get("name_en"),
-                "category": item.get("category"),
-                "original_initial_cost": item.get("initial_cost"),
-                "original_monthly_cost": item.get("monthly_cost"),
-            }
-            for item in DEFAULT_ITEMS
-        ],
-        ensure_ascii=False,
-        indent=2,
-    )
+    default_items_for_prompt = _build_default_items_reference()
+    default_items_avoidance_block = _build_default_item_avoidance_block()
 
     prompt = f"""
 Age: {age} / Family: {family}
@@ -352,6 +432,13 @@ Age: {age} / Family: {family}
 【Default Items Reference】
 Use these items as reference for cost adjustment (if applicable):
 {default_items_for_prompt}
+
+{default_items_avoidance_block}
+
+【Recommendation Boundary】
+- Recommend only items that would not already be covered by the default catalog.
+- If a draft recommendation feels like "default item + adjective" or "default item + setting change", replace it.
+- A good recommendation should feel like a new life move, not a catalog variant.
 """
 
     try:
