@@ -84,7 +84,7 @@ The default catalog contains **17 curated items** across these categories.
 
 For each item $i$, a binary decision variable $x_i \in \{0,1\}$ is created. The solver maximizes:
 
-$$\text{Maximize} \sum_i x_i \cdot u_i + \text{savings\_value}$$
+$$\text{Maximize } \sum_i x_i \cdot u_i + \text{savings value}$$
 
 Where item utility combines value-axis weights, priority-weighted bonuses, and budget-aware trade-offs.
 
