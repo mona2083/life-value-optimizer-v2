@@ -1,6 +1,7 @@
 streamlit
 ortools
 google-genai
+openai
 plotly
 pandas
 numpy

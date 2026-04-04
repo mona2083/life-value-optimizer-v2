@@ -1,33 +1,31 @@
 import os
-import google.generativeai as genai
-from google.generativeai.types import RequestOptions
 import json
+from openai import OpenAI
 from default_items import DEFAULT_ITEMS
 
-# APIキーの設定
-api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key:
-    # 開発環境用のフォールバック（本番環境では必ず環境変数を使用）
+def _resolve_openai_api_key() -> str | None:
+    # Priority: environment variable -> Streamlit secrets -> local keys.py
+    key = os.environ.get("OPENAI_API_KEY")
+    if key:
+        return key
+
     try:
-        from keys import GEMINI_API_KEY
-        api_key = GEMINI_API_KEY
-    except ImportError:
-        print("Error: GEMINI_API_KEY not found. Please set the environment variable.")
+        import streamlit as st  # Optional dependency context
+        if "OPENAI_API_KEY" in st.secrets:
+            return st.secrets["OPENAI_API_KEY"]
+    except Exception:
+        pass
 
-genai.configure(api_key=api_key)
+    try:
+        from keys import OPENAI_API_KEY
+        return OPENAI_API_KEY
+    except Exception:
+        return None
 
-# モデルの初期化
-generation_config = {
-    "temperature": 0.3, # 心理判定としてブレを少なくするため低めに設定
-    "top_p": 0.95,
-    "top_k": 40,
-    "max_output_tokens": 4096,  # Increased to accommodate full JSON with all recommended actions
-}
 
-_client = genai.GenerativeModel(
-    model_name="gemini-2.5-flash-lite", # 最新のliteモデル
-    generation_config=generation_config,
-)
+_api_key = _resolve_openai_api_key()
+_MODEL_NAME = "gpt-4o-mini"
+_client = OpenAI(api_key=_api_key) if _api_key else None
 
 # =====================================================================
 # Functions
@@ -592,11 +590,20 @@ Use these items as reference for cost adjustment (if applicable):
 - A good recommendation should feel like a new life move, not a catalog variant.
 """
 
+    if _client is None:
+        print("OpenAI Profile Error: OPENAI_API_KEY not found. Please set the environment variable.")
+        return None
+
     try:
-        response = _client.generate_content(
-            contents=f"{sys_prompt}\n\n{prompt}"
+        response = _client.chat.completions.create(
+            model=_MODEL_NAME,
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
         )
-        text = response.text.strip()
+        text = (response.choices[0].message.content or "").strip()
         
         # Robust JSON extraction: Find the outermost valid JSON object
         # Strategy: Start from first "{" and find matching "}"
@@ -644,7 +651,7 @@ Use these items as reference for cost adjustment (if applicable):
                 print(f"⚠️  JSON incomplete (depth={depth}), using last closing brace at position {last_closing_brace}")
                 end = last_closing_brace
             else:
-                print(f"Gemini Profile Error: No closing brace found in JSON")
+                print(f"OpenAI Profile Error: No closing brace found in JSON")
                 print(f"Response text (first 1000 chars): {text[:1000]}")
                 return None
         
@@ -665,12 +672,12 @@ Use these items as reference for cost adjustment (if applicable):
                 print(f"✅ Fixed JSON by adding closing braces")
                 return result
             except:
-                print(f"Gemini Profile Error: JSON parsing failed even after fixing")
+                print(f"OpenAI Profile Error: JSON parsing failed even after fixing")
                 print(f"Original JSON (first 500 chars): {json_str[:500]}")
                 return None
         
     except Exception as e:
-        print(f"Gemini Profile Error: {type(e).__name__} - {e}")
+        print(f"OpenAI Profile Error: {type(e).__name__} - {e}")
         print(f"Response text snippet: {text[:300] if 'text' in locals() else 'N/A'}")
         return None
 
@@ -823,16 +830,25 @@ The output language MUST be in {lang}.
     prompt = """Input Data (JSON):
 """ + json.dumps(input_payload, ensure_ascii=False, indent=2)
 
+    if _client is None:
+        print("OpenAI Summary Error: OPENAI_API_KEY not found. Please set the environment variable.")
+        return None
+
     try:
-        response = _client.generate_content(
-            contents=f"{sys_prompt}\n\n{prompt}"
+        response = _client.chat.completions.create(
+            model=_MODEL_NAME,
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
         )
-        text = response.text.strip()
+        text = (response.choices[0].message.content or "").strip()
         start = text.find("{")
         end = text.rfind("}") + 1
         if start == -1 or end <= start:
             return None
         return json.loads(text[start:end])
     except Exception as e:
-        print(f"Gemini Summary Error: {e}")
+        print(f"OpenAI Summary Error: {e}")
         return None
