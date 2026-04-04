@@ -125,9 +125,9 @@ def dict_get_or_zero(d, key):
 
 def estimate_food_cost(user_profile: dict, lifestyle_data: dict) -> dict:
     """
-    推定食費を返す（UI表示はしない）。
-    式:
-      (世帯人数係数 × 基本単価) × スタイル補正係数 + 外食/QOL加算
+        Return estimated food cost (without rendering UI output).
+        Formula:
+            (household-size coefficient x base unit cost) x style coefficient + dining/QOL additions
     """
     base_unit = 400.0
     child_coeff = 0.7
@@ -137,11 +137,11 @@ def estimate_food_cost(user_profile: dict, lifestyle_data: dict) -> dict:
     children = int(user_profile.get("household_children", 0) or 0)
     infants = int(user_profile.get("household_infants", 0) or 0)
 
-    # 成人等価人数
+    # Adult-equivalent household size
     adult_equivalent = adults + children * child_coeff + infants * infant_coeff
     total_headcount = adults + children + infants
 
-    # 世帯規模調整
+    # Household scale adjustment
     if total_headcount <= 1:
         scale_adjust = 1.2
     elif total_headcount == 2:
@@ -163,7 +163,7 @@ def estimate_food_cost(user_profile: dict, lifestyle_data: dict) -> dict:
     }
     style_name, style_coeff = style_map.get(style_key, ("Standard", 1.00))
 
-    # 外食・デリバリー QOL 加算（頻度 × トーン）
+    # Dining out and delivery QOL additions (frequency x tone)
     tone_coeffs = {"utility": 1.5, "casual": 2.5, "experience": 4.0}
     freq_mult = {"0_1": 1.0, "2_3": 2.0, "4_plus": 3.2}
     tone = food.get("dining_out_tone", "utility")
@@ -180,10 +180,10 @@ def estimate_food_cost(user_profile: dict, lifestyle_data: dict) -> dict:
 
     base_component = adult_equivalent * base_unit * scale_adjust
 
-    # ===== 2段階食費モデル =====
-    # C_min: Minimalist（最低限）までの"充足"コスト（生存ラインのみ、外食加算なし）
-    # C_survey: アンケートの希望水準（home style + dining tone/freq + オプション）
-    # C_max: 理論上の最大（home style最大 + 外食最大 + オプション全部ON）
+    # ===== Two-stage food cost model =====
+    # C_min: Fulfillment cost up to Minimalist baseline (survival line only, no dining additions)
+    # C_survey: Target level from survey responses (home style + dining tone/frequency + options)
+    # C_max: Theoretical maximum (max home style + max dining + all options on)
     minimalist_floor = base_component * 0.75
     estimated = (base_component * style_coeff) + qol_add  # C_survey
 

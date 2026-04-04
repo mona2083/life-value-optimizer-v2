@@ -4,10 +4,10 @@ from google.generativeai.types import RequestOptions
 import json
 from default_items import DEFAULT_ITEMS
 
-# APIキーの設定
+# API key setup
 api_key = os.environ.get("GEMINI_API_KEY")
 if not api_key:
-    # 開発環境用のフォールバック（本番環境では必ず環境変数を使用）
+    # Development fallback (production should always use environment variables)
     try:
         from keys import GEMINI_API_KEY
         api_key = GEMINI_API_KEY
@@ -16,16 +16,16 @@ if not api_key:
 
 genai.configure(api_key=api_key)
 
-# モデルの初期化
+# Model initialization
 generation_config = {
-    "temperature": 0.3, # 心理判定としてブレを少なくするため低めに設定
+    "temperature": 0.3, # Keep low to reduce variance in psychological profiling
     "top_p": 0.95,
     "top_k": 40,
     "max_output_tokens": 4096,  # Increased to accommodate full JSON with all recommended actions
 }
 
 _client = genai.GenerativeModel(
-    model_name="gemini-2.5-flash-lite", # 最新のliteモデル
+    model_name="gemini-2.5-flash-lite", # Latest lite model
     generation_config=generation_config,
 )
 
@@ -44,7 +44,7 @@ def _choice_letter(option_str: str) -> str | None:
     return None
 
 
-# Step3 Q4（栄養ゼリー）の選択肢に対応する「食」の重み（1〜10）
+# Food weight mapping (1-10) for Step 3 Q4 "nutrition jelly" choices
 JELLY_FOOD_WEIGHT = {"A": 1, "B": 5, "C": 9, "D": 3}
 
 
@@ -452,10 +452,11 @@ def _clean_json_string(json_str: str) -> str:
 
 def get_user_profile(age: int, family: str, combined_data_str: str, lang: str) -> dict | None:
     """
-    心理学・行動経済学に基づいた定型回答と自由記述を複合解析し、価値観スコア(1-10)を推論する
+    Infer value scores (1-10) by jointly analyzing structured answers and free text
+    based on psychology and behavioral economics.
     """
     
-    # 熟練ライフプランナー兼心理学者としてのシステムプロンプト（JSON出力強制）
+    # System prompt as an expert life planner and psychologist (strict JSON output)
     sys_prompt = f"""
 ### ROLE & ARCHETYPE
 You are a World-Class Senior Life Planner and Behavioral Psychologist (30+ years experience).
@@ -682,10 +683,10 @@ def get_result_summary(
     context: dict | None = None,
 ) -> dict | None:
     """
-    最適化結果に対するAIライフコーチからのフィードバックを生成する
+    Generate AI life-coach feedback for optimization results.
     """
     
-    # ユーザーが見るアイテム名を言語に合わせて抽出
+    # Extract display item names according to the selected language
     selected_names = []
     for item in result["selected"]:
         name = item["name_ja"] if lang == "ja" else item["name_en"]

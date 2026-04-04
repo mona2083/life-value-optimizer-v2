@@ -3,11 +3,11 @@ import streamlit as st
 from pydantic import BaseModel, Field
 from openai import OpenAI
 
-# OpenAIクライアントの初期化（オプショナル - API キーがない場合は None）
+# OpenAI client initialization (optional - None when API key is unavailable)
 _api_key = st.secrets.get("OPENAI_API_KEY") if "OPENAI_API_KEY" in st.secrets else os.environ.get("OPENAI_API_KEY")
 client = OpenAI(api_key=_api_key) if _api_key else None
 
-# ── Pydanticスキーマの定義 ────────────────────────────────────────
+# -- Pydantic schema definitions -------------------------------------
 class ItemDefaults(BaseModel):
     initial_cost: int = Field(description="One-time USD cost (e.g., 500)", default=0)
     monthly_cost: int = Field(description="Monthly USD cost (e.g., 50)", default=0)
@@ -22,10 +22,10 @@ class UserProfileFromPassion(BaseModel):
     existing_assets: str = Field(description="Existing possessions/assets (e.g., 'Car, Apartment', 'Unknown')")
     interests: str = Field(description="Hobbies and interests (e.g., 'Surfing, Coffee, Coding', 'Unknown')")
 
-# ── AI推論関数 ──────────────────────────────────────────────────
+# -- AI inference functions -------------------------------------------
 def get_item_defaults(item_name: str, lang: str) -> dict | None:
     """
-    ユーザーが入力したアイテム名から、現実的なコストと価値観スコアを推論する
+    Infer realistic costs and value scores from a user-provided item name.
     """
     system_prompt = """
     You are a financial and lifestyle advisor.
@@ -34,17 +34,17 @@ def get_item_defaults(item_name: str, lang: str) -> dict | None:
     """
     try:
         response = client.beta.chat.completions.parse(
-            model="gpt-4o-mini", # コストと速度のバランスで最適
+            model="gpt-4o-mini", # Balanced for cost and speed
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Item to evaluate: {item_name}"}
             ],
             response_format=ItemDefaults,
-            temperature=0.0, # 再現性確保
-            seed=42          # 実験管理・再現性のためのシード固定
+            temperature=0.0, # Ensure reproducibility
+            seed=42          # Fixed seed for experiment control/reproducibility
         )
         
-        # Pydanticモデルから辞書型へ安全に変換して返す
+        # Safely convert Pydantic model output to a dictionary
         parsed_data = response.choices[0].message.parsed
         return parsed_data.model_dump()
         
@@ -54,16 +54,16 @@ def get_item_defaults(item_name: str, lang: str) -> dict | None:
 
 def extract_user_profile_from_passion(passion_text: str, lang: str) -> dict:
     """
-    ユーザーの自由記述テキストから Location, Career, Existing Assets, Interests を抽出する。
+    Extract Location, Career, Existing Assets, and Interests from user free text.
     
     Args:
-        passion_text: ユーザーが入力した自由記述テキスト
-        lang: 言語（'ja' または 'en'）
+        passion_text: Free-text input provided by the user.
+        lang: Language ('ja' or 'en').
     
     Returns:
         { "location": "...", "career": "...", "existing_assets": "...", "interests": "..." }
     """
-    # OpenAI API キーがない場合はスキップ
+    # Skip if no OpenAI API key is available
     if client is None:
         return {
             "location": "Unknown",
@@ -126,15 +126,15 @@ def get_result_summary(
     lang: str,
 ) -> str | None:
     """
-    最適化結果の数値を読み解き、自然言語で要約を生成する
+    Interpret optimization metrics and generate a natural-language summary.
     """
-    # OpenAI API キーがない場合はスキップ
+    # Skip if no OpenAI API key is available
     if client is None:
         return None
     
     selected_names = [item["name"] for item in result["selected"]]
     
-    # 既存のプロンプトテキストをそのまま流用
+    # Reuse the existing prompt text as-is
     if lang == "ja":
         prompt_text = f"""
 あなたはライフスタイルアドバイザーです。以下の最適化結果を2〜3文で要約してください。専門用語は使わず、わかりやすく前向きなトーンで。
@@ -164,7 +164,7 @@ Savings goal rate: {result['savings_rate']:.0%}
             messages=[
                 {"role": "user", "content": prompt_text}
             ],
-            temperature=0.3, # 要約のトーンにわずかな柔軟性を持たせるため0.3とする
+            temperature=0.3, # Slight flexibility in summary tone
             seed=42
         )
         return response.choices[0].message.content.strip()

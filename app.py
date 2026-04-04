@@ -71,6 +71,18 @@ st.title(T["title"])
 st.caption(T.get("caption", ""))
 st.markdown(T["desc"])
 
+with st.container(border=True):
+    st.markdown(f"### {T['liability_title']}")
+    st.markdown(f"**{T['liability_prof_title']}**")
+    st.caption(T["liability_prof_body"])
+    st.markdown(f"**{T['liability_ai_title']}**")
+    st.caption(T["liability_ai_body"])
+
+ack_disclaimer = st.checkbox(T["liability_ack_label"], value=False)
+if not ack_disclaimer:
+    st.warning(T["liability_ack_required"])
+    st.stop()
+
 # =====================================================================
 # Step 0.5: Passion Text Input
 # =====================================================================
@@ -79,22 +91,22 @@ passion_text = ui.render_passion_text_input(T)
 st.divider()
 
 # =====================================================================
-# メインフロー（新UI：9つのステップ）
+# Main flow (new UI: 9 steps)
 # =====================================================================
 
-# 1. 使える金額の確定 & 2. リスクコスト & 3. 収入見込み & 4. 貯金目標
-# （これらは「基本の財務設定」として1つのUI関数にまとめます）
+# 1. Confirm available budget & 2. Risk costs & 3. Income projection & 4. Savings goal
+# (These are grouped into a single UI function as the core financial setup.)
 financial_data = ui.render_financial_setup(T)
 
 st.divider()
 
-# 5. 現在のライフスタイル（Q1〜Q5）＋ 5b. 食事・外食（推定食費用）
-# 回答は dict として受け取り、後続のアイテム補正・食費推定・LLM推論に使います
+# 5. Current lifestyle (Q1-Q5) + 5b. Meals and dining out (for food cost estimation)
+# Responses are collected as a dict and used for item adjustment, food estimation, and LLM inference.
 lifestyle_data = ui.render_lifestyle_questions(T, lang)
 food_data = ui.render_food_questions(T)
 lifestyle_data["food"] = food_data
 
-# 食費推定（NEW: Location-aware calculation from new architecture）
+# Food cost estimation (NEW: location-aware calculation from new architecture)
 # Using the new core/food_calculator which includes location detection
 user_profile = financial_data.get("user_profile", {})
 passion_text = st.session_state.get("passion_text", "")
@@ -149,20 +161,20 @@ print(f"   location_adjustment: {food_estimate.location_adjustment}x")
 
 st.divider()
 
-# 6. 価値観のLLM推論（ハイブリッド・プロファイリング）
-# Step 5の定型データと、ユーザーの自由記述を合わせてLLMに投げ、スライダーを自動設定します
-# Note: ui/lifestyle.py の render_llm_profiling 内で既に estimated_food_cost の処理が行われています
+# 6. LLM-based value inference (hybrid profiling)
+# Combine Step 5 structured data with user free text, send to the LLM, and auto-set sliders.
+# Note: estimated_food_cost is already handled in ui/lifestyle.py render_llm_profiling.
 weights_data = ui.render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=food_data)
 
 st.divider()
 
-# 7. アイテム修正（Optional）
-# 裏側で補正されたアイテム一覧を表示し、微調整したいユーザーだけが触る画面
+# 7. Item adjustment (optional)
+# Show the internally adjusted item list for users who want fine-tuning.
 ui.render_item_review(T, lang)
 
 st.divider()
 
-# サマリー表示 & 最適化の実行
+# Display summary and run optimization
 st.header(T.get("step89_title", "5. 📊 Summary & optimization"))
 st.info(T.get("step89_intro", ""))
 use_ai_for_optimize = st.toggle(
@@ -241,13 +253,13 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                 f"(base ${base_monthly_after_food:,} - risk ${risk_monthly_total:,})"
             )
 
-        # 最適化エンジンに渡す全候補アイテムのリストを構築
+        # Build the complete list of candidate items for the optimization engine
         candidates = []
         prefer_car_soft_bonus = bool(st.session_state.get("prefer_car_soft_bonus", False))
         prefer_car_soft_bonus_value = int(st.session_state.get("prefer_car_soft_bonus_value", 30000) or 0)
         for cat, df in st.session_state.category_dfs.items():
             for idx, row in df.iterrows():
-                # UI側のセッションステート（スライダー等の値）から最新の状態を取得
+                # Get the latest state from UI session state (slider values, etc.)
                 pri = st.session_state.get(f"priority_{cat}_{idx}", row["priority"])
                 mand = st.session_state.get(f"mandatory_{cat}_{idx}", row["mandatory"])
                 ic = st.session_state.get(f"initial_cost_{cat}_{idx}", row["initial_cost"])
@@ -256,7 +268,7 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                 safe_ic = int(max(0, _safe_float(ic, 0)))
                 safe_mc = int(max(0, _safe_float(mc, 0)))
                 
-                # 優先度0は除外。ただし必須指定は候補に残す
+                # Exclude priority 0 items, but keep mandatory items as candidates
                 if pri > 0 or mand:
                     soft_bonus = 0
                     if (
@@ -413,7 +425,7 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                 result["missed_mandatory_count"] = len(missed_ids)
                 result["missed_mandatory_items"] = missed_items
 
-        # 結果の描画（AIライフコーチダッシュボード含む）
+        # Render results (including the AI life-coach dashboard)
         if result is not None:
             ui.render_risk_and_results(
                 result,

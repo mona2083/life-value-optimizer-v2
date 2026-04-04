@@ -185,8 +185,8 @@ def render_financial_setup(T):
 
 def render_passion_text_input(T: dict) -> str:
     """
-    ユーザーの自由記述テキスト入力UI
-    「あなたのことを教えてください」という1つの大きなテキストボックス
+    Free-form user text input UI.
+    One large text box under "Tell us about yourself".
     """
     st.header(T.get("passion_title", "✨ Tell us about yourself"))
     st.markdown(T.get("passion_intro", ""))

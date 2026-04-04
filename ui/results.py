@@ -280,7 +280,7 @@ def render_risk_and_results(
                 st.caption(f"💡 Food breakdown: Base(\\${int(food_floor):,}) + Std(\\${int(food_stage1_used):,}) + Upgrade(\\${int(food_stage2_used):,}) = Total(\\${int(food_total):,})")
 
 
-    # アイテム選択カウント表示
+    # Display selected-item count
     if selected:
         with st.container(border=True):
             st.markdown(f"**📦 {'アイテム選択数' if lang == 'ja' else 'Selected Items'} / 📊 {'カテゴリ別内訳' if lang == 'ja' else 'Category Breakdown'}**")
@@ -813,7 +813,7 @@ def render_risk_and_results(
             else:
                 st.caption(f"💡 Food breakdown: Base(\\${int(food_floor):,}) + Std(\\${int(food_stage1_used):,}) + Upgrade(\\${int(food_stage2_used):,}) = Total(\\${int(food_total):,})")
 
-    # アイテム選択カウント表示
+    # Display selected-item count
     if selected:
         with st.container(border=True):
             st.markdown(f"**📦 {'アイテム選択数' if lang == 'ja' else 'Selected Items'} / 📊 {'カテゴリ別内訳' if lang == 'ja' else 'Category Breakdown'}**")

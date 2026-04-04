@@ -361,7 +361,7 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
                 if profile_result:
                     _apply_weights_to_sliders(profile_result)
                     
-                    # AI推定食費の優先：AIがestimated_food_costを返した場合、それをデフォルト値より優先する
+                    # Prioritize AI-estimated food cost: if AI returns estimated_food_cost, use it over defaults
                     ai_estimated_food = profile_result.get("estimated_food_cost")
                     if ai_estimated_food and isinstance(ai_estimated_food, dict) and "minimalist_floor_cost" in ai_estimated_food:
                         # Ensure location_adjustment is applied to minimalist_floor_cost
@@ -486,13 +486,13 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
         res = st.session_state["ai_insight"]
         st.markdown(f"### 🤖 AI Insight")
         
-        # JSONキーが日本語に翻訳された場合もフォールバックとして対応
+        # Fallback handling for cases where JSON keys are translated into Japanese
         is_ja = st.session_state.get("lang") == "ja"
         p_title = "ペルソナ (Persona):" if is_ja else "Persona:"
         s_title = "サマリー (Summary)" if is_ja else "Summary"
         c_title = "心の綱引き (Psychological Conflict)" if is_ja else "Psychological Conflict"
 
-        # profile は JSON内部のネストされたオブジェクト
+        # profile is a nested object inside the JSON payload
         profile = res.get("profile", {})
         persona = profile.get("persona_title") or profile.get("ペルソナ") or profile.get("ペルソナ名") or profile.get("アーキタイプ") or profile.get("persona") or None
         summary = profile.get("summary") or profile.get("サマリー") or None
@@ -501,7 +501,7 @@ def render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=None
         if persona:
             st.info(f"🎭 **{p_title}** {persona}")
         
-        # サマリーと心の綱引きを2列コンテナで表示
+        # Display summary and psychological conflict in a two-column layout
         if summary or conflict:
             col_left, col_right = st.columns(2)
             
