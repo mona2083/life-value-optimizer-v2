@@ -717,9 +717,28 @@ def get_result_summary(
         for it in non_selected_high_priority
     ]
 
-    food_decision = "Food Upgrade" if int(result.get("food_stage2_monthly_cost", 0) or 0) > 0 else "Minimalist"
+    stage1_cap = float(financial_data.get("food_stage1_cap", 0) or 0)
+    stage2_cap = float(financial_data.get("food_stage2_cap", 0) or 0)
+    stage1_used = float(result.get("food_stage1_monthly_cost", 0) or 0)
+    stage2_used = float(result.get("food_stage2_monthly_cost", 0) or 0)
+    stage1_fulfillment_ratio = (stage1_used / stage1_cap) if stage1_cap > 0 else 1.0
+    stage1_fulfilled = stage1_fulfillment_ratio >= 0.95
+    stage2_active = stage2_used > 0
+
     if lang == "ja":
-        food_decision = "食のグレードアップ" if food_decision == "Food Upgrade" else "ミニマリスト"
+        if stage1_fulfilled and stage2_active:
+            food_decision = "希望食生活達成＋日常にプラスアルファ"
+        elif stage1_fulfilled:
+            food_decision = "希望食生活を達成（ベース枠）"
+        else:
+            food_decision = "希望食生活は一部調整（予算制約）"
+    else:
+        if stage1_fulfilled and stage2_active:
+            food_decision = "Base food plan achieved + extra upside"
+        elif stage1_fulfilled:
+            food_decision = "Base food plan achieved"
+        else:
+            food_decision = "Base food plan partially constrained by budget"
 
     input_payload = {
         "user_profile": {
@@ -748,11 +767,21 @@ def get_result_summary(
         },
         "food_context": {
             "home_meal_style": food_data.get("home_meal_style"),
+            "food_style": food_data.get("home_meal_style"),
+            "dining_out_tone": food_data.get("dining_out_tone"),
+            "dining_out_frequency": food_data.get("dining_out_frequency"),
+            "special_diet": bool(food_data.get("optional_special_diet", False)),
+            "optional_alcohol": bool(food_data.get("optional_alcohol", False)),
+            "optional_supplements": bool(food_data.get("optional_supplements", False)),
             "minimalist_floor_cost": financial_data.get("food_minimalist_floor"),
-            "stage1_cap": financial_data.get("food_stage1_cap"),
-            "stage2_cap": financial_data.get("food_stage2_cap"),
-            "stage1_used": result.get("food_stage1_monthly_cost", 0),
-            "stage2_used": result.get("food_stage2_monthly_cost", 0),
+            "stage1_cap": stage1_cap,
+            "stage2_cap": stage2_cap,
+            "stage1_used": stage1_used,
+            "stage2_used": stage2_used,
+            "stage1_fulfillment_ratio": round(stage1_fulfillment_ratio, 3),
+            "stage1_fulfilled": stage1_fulfilled,
+            "stage1_meaning": "Preferred baseline food plan" if lang != "ja" else "希望する食生活のベース",
+            "stage2_meaning": "Additional upside budget beyond baseline" if lang != "ja" else "ベースを超えたプラスアルファ予算",
             "decision": food_decision,
         },
         "weights": {
@@ -793,9 +822,12 @@ Every response must feel like it's coming from a mentor who truly knows and care
 2. The Narrative of Trade-offs (Sacrifice with Meaning):
    Never list items clinically. Frame every trade-off as a conscious, courageous choice. Example: "You chose to let go of [Excluded Item Desire] so you could invest deeply in [Core Value-aligned Item]. This isn't loss—it's clarity. This is you saying YES to what truly matters." Validate every sacrifice as spiritually meaningful.
 
-3. The Psychology of Food (Reframe Completely):
-   - If Food is 'Minimalist/Base': Frame as "Strategic Austerity"—a powerful discipline that frees mental energy and funds dreams. Paint it as intentional, not restrictive.
-   - If Food is 'Upgraded': Frame as "Vital Self-Investment"—validating that your body and joy are the engine for everything else. Quality food fuels your capacity to love, create, and impact others.
+3. The Psychology of Food (Use stage semantics strictly):
+    - Stage1 is the user's preferred baseline food plan (not "minimalist" by default).
+    - If stage1_fulfilled is true, treat baseline preference as achieved.
+    - Stage2 indicates additional upside budget beyond baseline ("plus alpha").
+    - Use food_style, dining_out_tone, dining_out_frequency, and special_diet to personalize the explanation.
+    - Never call it "minimalist" unless food_style is explicitly minimalist.
 
 4. Savings Reality Check (Psychological Honesty):
    Don't just evaluate numbers. Diagnose the psychology: Are they hoarding out of deep fear (sacrificing joy today for a security that may never feel safe)? Or are they struggling to save because they're saying yes to too much? Point this out with compassion but firmness, like a true coach would.
