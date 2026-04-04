@@ -5,7 +5,8 @@ Response parsing is handled separately in profile_extractor.py.
 """
 
 import os
-from typing import Optional
+import json
+from typing import Optional, Dict, Any
 from openai import OpenAI
 
 
@@ -35,12 +36,12 @@ class LLMClient:
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": "You are a helpful assistant that outputs strict JSON."},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": prompt}
             ],
-            temperature=0.2,
+            temperature=0.3,
+            max_tokens=1024
         )
-        return (response.choices[0].message.content or "").strip()
+        return response.choices[0].message.content
     
     def _build_profile_prompt(self, user_input: str) -> str:
         """Build the prompt for profile extraction"""
@@ -78,8 +79,9 @@ class LLMClient:
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": prompt}
             ],
             temperature=0.3,
+            max_tokens=1024
         )
-        return (response.choices[0].message.content or "").strip()
+        return response.choices[0].message.content

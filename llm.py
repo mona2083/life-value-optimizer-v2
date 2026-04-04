@@ -1,30 +1,27 @@
 import os
-import json
 from openai import OpenAI
+import json
 from default_items import DEFAULT_ITEMS
+import streamlit as st
 
 def _resolve_openai_api_key() -> str | None:
-    # Priority: environment variable -> Streamlit secrets -> local keys.py
-    key = os.environ.get("OPENAI_API_KEY")
-    if key:
-        return key
-
     try:
-        import streamlit as st  # Optional dependency context
-        if "OPENAI_API_KEY" in st.secrets:
-            return st.secrets["OPENAI_API_KEY"]
-    except Exception:
+        return st.secrets.get("OPENAI_API_KEY")
+    except (AttributeError, FileNotFoundError):
         pass
+
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if api_key:
+        return api_key
 
     try:
         from keys import OPENAI_API_KEY
         return OPENAI_API_KEY
-    except Exception:
+    except ImportError:
         return None
 
 
 _api_key = _resolve_openai_api_key()
-_MODEL_NAME = "gpt-4o-mini"
 _client = OpenAI(api_key=_api_key) if _api_key else None
 
 # =====================================================================
@@ -590,26 +587,27 @@ Use these items as reference for cost adjustment (if applicable):
 - A good recommendation should feel like a new life move, not a catalog variant.
 """
 
-    if _client is None:
-        print("OpenAI Profile Error: OPENAI_API_KEY not found. Please set the environment variable.")
+    if not _client:
+        print("OpenAI Profile Error: API key not configured")
         return None
 
     try:
         response = _client.chat.completions.create(
-            model=_MODEL_NAME,
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": prompt}
             ],
             temperature=0.3,
+            max_tokens=4096,
         )
-        text = (response.choices[0].message.content or "").strip()
+        text = response.choices[0].message.content.strip()
         
         # Robust JSON extraction: Find the outermost valid JSON object
         # Strategy: Start from first "{" and find matching "}"
         start = text.find("{")
         if start == -1:
-            print(f"Gemini Profile Error: No JSON opening brace found in response")
+            print(f"OpenAI Profile Error: No JSON opening brace found in response")
             return None
         
         # Find matching closing brace, but fall back to last } if incomplete
@@ -830,20 +828,21 @@ The output language MUST be in {lang}.
     prompt = """Input Data (JSON):
 """ + json.dumps(input_payload, ensure_ascii=False, indent=2)
 
-    if _client is None:
-        print("OpenAI Summary Error: OPENAI_API_KEY not found. Please set the environment variable.")
+    if not _client:
+        print("OpenAI Summary Error: API key not configured")
         return None
 
     try:
         response = _client.chat.completions.create(
-            model=_MODEL_NAME,
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": prompt}
             ],
             temperature=0.3,
+            max_tokens=2000,
         )
-        text = (response.choices[0].message.content or "").strip()
+        text = response.choices[0].message.content.strip()
         start = text.find("{")
         end = text.rfind("}") + 1
         if start == -1 or end <= start:
