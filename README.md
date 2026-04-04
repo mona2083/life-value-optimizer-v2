@@ -2,7 +2,7 @@
 
 > Maximize your life quality within a limited budget — powered by AI + Mathematical Optimization.
 
-A Streamlit app that finds the optimal combination of lifestyle spending — gym, travel fund, bicycle, subscriptions, and more — within your real monthly budget. Unlike a simple budget tracker, this app treats every expense as an **investment decision** and mathematically proves the best allocation.
+A Streamlit app that helps users make intentional spending decisions by balancing life quality, budget limits, and long-term goals. It treats each expense as an investment decision and uses optimization plus AI feedback to surface the best allocation.
 
 ---
 
@@ -12,41 +12,39 @@ A Streamlit app that finds the optimal combination of lifestyle spending — gym
 
 ---
 
-## The Problem It Solves
+## What It Does
 
-Most budgeting tools just track spending. This app answers a harder question: **given your income, goals, and values — what should you actually spend money on?**
+Most budgeting tools only track expenses. This app answers a harder question: **given your income, values, and lifestyle, what should you actually spend money on?**
 
-- A bicycle isn't just "$500" — it saves commute time, builds health, and brings satisfaction
-- Savings aren't just "leftover money" — they compete directly with other items for priority
-- Your lifestyle habits (diet, exercise) affect the health scores of every item you select
+- A bicycle is not just a cost item; it affects commute time, health, and satisfaction
+- Savings compete directly with other items for priority and utility
+- Food and lifestyle habits influence the optimization result through AI-assisted estimation
 
-The optimizer finds the combination that **maximizes your total life value**, not just minimizes spending.
+The optimizer finds the combination that **maximizes your total life value**, not just the lowest spend.
 
 ---
 
 ## Features
 
-### Step 1 — Profile & Fixed Costs
-- Monthly income → auto-calculates disposable income after fixed costs (rent, utilities, groceries, insurance)
-- Household structure, age, and lifestyle inputs
+### Step 1 — Budget & Goals
+- Monthly budget setup from income and fixed costs
+- Household structure, age, debt, and savings target inputs
 
-### Step 2 — Goals & Value Weights
-- Savings goal (e.g. "$5,000 in 2 years" → $208/month target)
-- Four value axes: Time Saving / Health / Satisfaction / Savings (1–10 sliders)
-- Presets: 今を豊かに生きる / 将来に備える / 健康に長生きする / 自己成長・キャリア / Custom
+### Step 2 — Current Lifestyle
+- Lifestyle and mobility questions
+- Car ownership and social/leisure preferences
 
-### Step 3 — Item Selection
-- 50+ items across 9 categories with editable costs and priority scores
-- Transport as **packages** — mutually exclusive (Car / E-Bike+Uber / Bicycle Only / etc.)
-- Mandatory checkbox to force-include any item
-- **AI auto-fill**: type any item name → Gemini suggests costs and scores automatically
+### Step 3 — Values & Passion
+- AI-assisted value inference from survey answers and free-form passion text
+- Food estimate integration and value-weight refinement
 
-### Results
-- AI-generated summary in natural language (Gemini)
-- Selected items grouped by category with total cost breakdown
-- Savings rate vs. savings goal
-- Top 5 next-best unselected items
-- Budget sensitivity analysis — how total value changes as budget increases
+### Step 4 — AI-Recommended Items
+- Review and adjust AI-proposed items
+- Toggle include/skip per item before optimization
+
+### Step 5 — Summary & Optimization
+- Run OR-Tools optimization with budget and category constraints
+- AI life-coach summary, savings outlook, and value fulfillment view
 
 ### Risk Cost Estimation
 - Medical, housing repair, car repair, education, emergency fund
@@ -55,27 +53,42 @@ The optimizer finds the combination that **maximizes your total life value**, no
 
 ---
 
+## Current Categories
+
+The optimizer currently uses 5 canonical categories:
+
+- Transport
+- Living & Dining
+- Well-being
+- Leisure & Play
+- Growth & Learning
+
+The default catalog contains **17 curated items** across these categories.
+
+---
+
 ## Tech Stack
 
 | Component | Technology |
 |---|---|
 | UI | `streamlit` |
-| Optimization | `ortools` CP-SAT (Google OR-Tools) |
+| Optimization | `ortools` CP-SAT |
 | LLM | Google Gemini 2.5 Flash Lite API (`google-genai`) |
 | Visualization | `plotly` |
-| i18n | Custom dictionary-based (Japanese / English) |
+| Data Processing | `pandas`, `numpy` |
+| i18n | Dictionary-based (Japanese / English) |
 
 ---
 
-## The Optimization Model
+## Optimization Model
 
 For each item $i$, a binary decision variable $x_i \in \{0,1\}$ is created. The solver maximizes:
 
-$$\text{Maximize} \sum_i x_i \cdot u_i + \text{savings\_value}$$
+$$\text{Maximize } \sum_i x_i \cdot u_i + \text{savings value}$$
 
-Where item utility combines four value axes with priority-weighted bonuses, and savings utility competes directly with items — making the trade-off between spending and saving mathematically explicit.
+Where item utility combines value-axis weights, priority-weighted bonuses, and budget-aware trade-offs.
 
-**Hard constraints** include budget limits (one-time + monthly), exactly one transport package, and dependency constraints (pet insurance requires pet, car insurance requires car).
+**Hard constraints** include budget limits, exactly one transport package when required, mandatory items, and dependency constraints.
 
 ---
 
@@ -83,17 +96,37 @@ Where item utility combines four value axes with priority-weighted bonuses, and 
 
 ```
 life-value-optimizer/
-├── app.py              # Streamlit UI + session state management
-├── optimizer.py        # OR-Tools CP-SAT model (utility theory)
-├── sensitivity.py      # What-if analysis (budget sensitivity)
-├── llm.py              # Gemini API (item auto-fill + summary)
-├── lang.py             # Bilingual text dictionary (ja/en)
-├── default_items.py    # 50+ items across 9 categories
-├── lifestyle.py        # Lifestyle-based score adjustments
-├── risk_cost.py        # Future risk cost estimation
+├── app.py
+├── default_items.py
+├── lang.py
+├── llm.py
+├── openai_handler.py
+├── optimizer.py
+├── risk_cost.py
+├── sensitivity.py
 ├── requirements.txt
-└── .streamlit/
-    └── secrets.toml    # GEMINI_API_KEY (not committed)
+├── ai/
+│   ├── __init__.py
+│   ├── llm_client.py
+│   └── profile_extractor.py
+├── core/
+│   ├── __init__.py
+│   ├── food_calculator.py
+│   └── models.py
+├── state/
+│   ├── __init__.py
+│   └── session.py
+└── ui/
+    ├── __init__.py
+    ├── lifestyle.py
+    ├── logic.py
+    ├── results.py
+    ├── review.py
+    ├── setup.py
+    └── pages/
+        ├── __init__.py
+        ├── items.py
+        └── summary.py
 ```
 
 ---
@@ -107,10 +140,10 @@ life-value-optimizer/
 ### Installation
 
 ```bash
-git clone https://github.com/mona2083/life-value-optimizer.git
-cd life-value-optimizer
+git clone https://github.com/mona2083/life-value-optimizer-v2.git
+cd LVO2
 python -m venv .venv
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 

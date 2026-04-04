@@ -102,13 +102,29 @@ LANG = {
         "reset_btn":               "🔄 リセット",
         "run_opt_btn":             "🚀 最適化を実行",
         "desc":                    "あなたの予算と価値観に基づき、最高のライフスタイルを数理最適化×AIで提案します。",
-        # 新UI Step1〜Step4
+        "liability_title": "⚠️ 重要な免責事項",
+        "liability_prof_title": "重要：金融・専門的な助言ではありません",
+        "liability_prof_body": "本アプリは教育および自己変革を目的としたシミュレーションツールです。認定された財務、法律、または医療上の助言を提供するものではありません。計算結果やAIの洞察は2026年の経済予測とユーザー入力に基づくものであり、人生の重要な決定の唯一の根拠とすべきではありません。重要な金融・生活上の変更を行う前に、必ず有資格の専門家にご相談ください。",
+        "liability_ai_title": "AIの限界と正確性",
+        "liability_ai_body": "本ツールは大規模言語モデル（LLM）と数理最適化を用いて提案を生成します。現実性の向上に努めていますが、AIは不正確な情報や幻覚的な出力を含む場合があります。本情報の利用に伴うリスクは利用者が負います。開発者は、表示情報の誤り・欠落、または利用に起因する損失について責任を負いません。",
+        "liability_ack_label": "これはAIシミュレーションであり、金融助言ではないことを理解しました（I understand that this is an AI-driven simulation and not financial advice）",
+        "liability_ack_required": "上記の免責事項に同意するチェックを入れると、入力フォームと最適化機能が有効になります。",
+        # New UI Step 1-Step 4
         "step1_title": "1. 💰 予算と目標の設定",
         "step2_title": "2. 👤 現在のライフスタイル",
         "step3_title": "3. 🧠 価値観と熱量の分析",
-        "step4_title": "4. ⚙️ アイテムの微調整 (Optional)",
+        "step4_title": "4. 🤖 AIが提案するあなたのアイテム",
         
-        # 予算入力
+        # AI-recommended items display
+        "ai_recommended_items_intro": "あなたの生活、価値観、予算に基づき、AIが10個のアイテムを提案しました。不要なものがあれば、削除してください。",
+        "ai_recommended_no_items": "推奨アイテムは準備中です。価値観の分析が完了してから表示されます。",
+        "ai_item_card_add_btn": "このアイテムを追加",
+        "ai_item_card_skip_btn": "スキップ",
+        "ai_card_status_added": "✅ 追加済み",
+        "ai_card_status_skipped": "❌ スキップ済み",
+        "ai_items_added_count": "選択したアイテム: {count}個",
+        
+        # Budget input
         "know_budget_q": "毎月自由に使える予算（可処分所得）は決まっていますか？",
         "yes_calc": "はい",
         "no_calc": "いいえ、計算する",
@@ -120,18 +136,18 @@ LANG = {
         "calc_result": "算出された予算",
         "initial_budget_label": "初期投資に使える貯金 ($)",
         
-        # リスク
+        # Risk
         "risk_toggle": "⚠️ 現実的なリスクを考慮する",
         
-        # 目標
+        # Goal
         "goals_subdir": "🎯 目標設定",
         "target_total_label": "目標貯金金額 ($)",
         "period_label": "目標達成までの期間 (年)",
-        "alert_savings_impossible": "⚠️ **少し無茶な目標かもしれません**: 目標から計算される月額貯蓄（${int_target:,}）が、今の可処分予算（${int_budget:,}）を超えています。期間か金額の見直しをおすすめします。",
-        "alert_savings_high": "⚠️ **かなりストイックな目標です**: 毎月の予算（${int_budget:,}）のうち、{ratio:.0f}%（${int_target:,}）を貯金に回す計算になります。生活費や交際費がかなり圧迫されます。",
-        "alert_savings_healthy": "💡 **現実的な目標です**: 毎月の予算（${int_budget:,}）のうち、{ratio:.0f}%（${int_target:,}）を貯金に回す計算になります。",
+        "alert_savings_impossible": "⚠️ 少し無茶な目標かもしれません: 目標から計算される月額貯蓄 {int_target:,} ドルが、今の可処分予算 {int_budget:,} ドルを超えています。期間か金額の見直しをおすすめします。",
+        "alert_savings_high": "⚠️ かなりストイックな目標です: 毎月の予算 {int_budget:,} ドルのうち、{ratio:.0f}% にあたる {int_target:,} ドルを貯金に回す計算になります。生活費や交際費がかなり圧迫されます。",
+        "alert_savings_healthy": "💡 現実的な目標です: 毎月の予算 {int_budget:,} ドルのうち、{ratio:.0f}% にあたる {int_target:,} ドルを貯金に回す計算になります。",
         
-        # ライフスタイル定型(Step2)
+        # Structured lifestyle questions (Step 2)
         "step2_desc": "あなたに最適な選択肢を絞り込むため、いくつか質問にお答えください。",
         "q_car_necessity": "Q1. 現在のお住まいや生活において、車は必須ですか？",
         "q_own_transport": "Q2. 現在所有している移動手段はありますか？（複数選択可）",
@@ -160,7 +176,7 @@ LANG = {
         "food_opt_supp": "サプリメント・プロテイン",
         "food_opt_diet": "特殊な食事制限（アレルギー、ベジタリアン など）",
         
-        # 価値観デプロイ(Step3：心理テスト)
+        # Value deployment (Step 3: psychological test)
         "step3_desc": "熟練のライフプランナー兼心理学者として、あなたの深層価値観を抽出するための質問を用意しました。",
         "q_time_deploy": "Q1. もし来週、予期せぬ3日間の休暇と自由な$500が与えられたら？",
         "q_risk_deploy": "Q2. 生活費が1.2倍になりました。『最後まで削りたくない』のは？",
@@ -171,10 +187,10 @@ LANG = {
         "q_jelly_b": "B: 平日は採用、週末は拒否。特別な日は食も楽しみたい。",
         "q_jelly_c": "C: 検討の余地なし。常に本物の食事を楽しみたい。",
         "q_jelly_d": "D: むしろ、そのゼリーの分を節約して他にお金を使いたい。",
-        "freetext_q5_intro": "Q5. 人生で譲れないこだわり、理想の生活、または『推し活』などの特定の情熱について自由に教えてください。",
-        "step3_freetext_desc": "人生で譲れないこだわり、理想の生活、または『推し活』などの特定の情熱について自由に教えてください。",
-        "freetext_label": "自由記述 (譲れないこだわり)",
-        "freetext_placeholder": "例：健康のために自炊はしたいが、移動の自由（車）は絶対に譲れない...",
+        "freetext_q5_intro": "Q5. 最後に、あなたの人生で譲れないこだわり、理想の生活、追加したいことなど自由に教えてください。",
+        "step3_freetext_desc": "あなたの人生で譲れないこだわり、理想の生活、追加したいことなど自由に教えてください。",
+        "freetext_label": "自由記述 (人生の優先順位)",
+        "freetext_placeholder": "例：毎年家族で海外旅行に行きたい。親の介護の時間も確保したい。その他は柔軟に対応できます。",
         "analyzing": "プロファイリング中...",
         "analysis_success": "AIがあなたの深層価値観を推論しました！下のスライダーで最終調整してください。",
         "analysis_fail": "AI分析に失敗しました。手動で設定してください。",
@@ -186,9 +202,9 @@ LANG = {
         "ai_summary_off": "AIサマリーはOFFです。数理最適化の結果のみ表示しています。",
         "w_subdir": "⚖️ 価値観の重み (1〜10)",
         
-        # アイテム修正(Step4)
-        "item_review_expander": "AIが補正した選択肢のリストを確認・微調整する",
-        "item_review_info": "Step 2・2bの回答に基づき、不要なものは優先度0に、所有済みの場合は初期費用が0に自動補正されています。",
+        # Item adjustment (Step 4)
+        "item_review_expander": "デフォルトカテゴリの一覧と編集",
+        "item_review_info": "不要なアイテムは優先度を0に、所有済みアイテムは初期費用を0に調整してください。カスタムアイテムの追加も可能です。",
         "item_list_subheader": "カテゴリ別の一覧と編集",
         "mandatory_label": "必須",
         "col_ic": "初期コスト",
@@ -211,7 +227,7 @@ LANG = {
         "lbl_other_fixed": "その他固定費（$）",
         "risk_household_caption": "食費推定と世帯規模の計算に使います。",
         "lbl_age": "本人の年齢",
-        "lbl_adults": "同居・大人",
+        "lbl_adults": "本人を含めた大人の人数",
         "lbl_children": "同居・子ども",
         "lbl_infants": "同居・乳幼児",
         "family_summary_fmt": "大人{adults}・子供{children}・乳幼児{infants}",
@@ -272,6 +288,7 @@ LANG = {
         "warn_item_name_required": "アイテム名を入力してください。",
         "err_category_resolve": "カテゴリの解決に失敗しました。",
         "success_item_added": "アイテムを追加しました。",
+        "success_item_removed": "アイテムを削除しました。",
         "item_slider_caption_mandatory": "必須",
         "item_slider_suffix": "（優先度0＝対象外）",
         "lbl_mc": "月額（$）",
@@ -344,6 +361,15 @@ LANG = {
         "val_axis_food": "食",
         "food_advice": "食費の分析",
         "savings_advice": "貯蓄の分析",
+        
+        # Passion Text Input (new Step 0.5)
+        "passion_title": "✨ あなたのことを教えてください",
+        "passion_intro": "自由に、あなたの人生・興味・仕事・現在地について語ってください。その文章から、あなたにぴったり合うアイテムと価値観を AI が読み取ります。",
+        "passion_label": "あなたについて教えてください（住んでいる場所（国・州・都市）と、生活状況・価値観・理想の暮らしを具体的に）",
+        "passion_guidance": "診断精度を高めるため、住んでいる場所（国・州・都市）と、生活状況・価値観・理想の暮らしを具体的にご記入ください。",
+        "passion_placeholder": "例）ハワイに住んでいる大学生で、車は持っています。週末は海に行くのが好きで、友人との交流も大切にしています。",
+        "extract_profile_btn": "🔍 あなたのプロフィールを分析",
+        "passion_analysis_success": "✅ プロフィール抽出完了！",
     },
     "en": {
         "portfolio_btn":            "🔗 View Portfolio",
@@ -448,10 +474,27 @@ LANG = {
         "reset_btn":               "🔄 Reset",
         "run_opt_btn":             "🚀 Run Optimization",
         "desc":                    "Proposing the optimal lifestyle based on your budget and values using mathematical optimization & AI.",
+        "liability_title": "⚠️ Important Liability Notice",
+        "liability_prof_title": "IMPORTANT: NOT FINANCIAL OR PROFESSIONAL ADVICE",
+        "liability_prof_body": "This application is a simulation tool for educational and transformational purposes only. It does not provide certified financial, legal, or medical advice. The calculations and AI-generated insights are based on 2026 economic projections and user input, and should not be used as the sole basis for critical life decisions. Always consult with a qualified professional before making significant financial or lifestyle changes.",
+        "liability_ai_title": "ACCURACY OF INFORMATION",
+        "liability_ai_body": "This tool utilizes Large Language Models (LLMs) and mathematical optimization to generate suggestions. While we strive for realism, the AI may produce inaccurate or hallucinated data. The user assumes all risks associated with the use of this information. The developer is not liable for any errors, omissions, or any losses arising from the display or use of this information.",
+        "liability_ack_label": "I understand that this is an AI-driven simulation and not financial advice.",
+        "liability_ack_required": "Please check the acknowledgment box to enable all inputs and optimization.",
         "step1_title": "1. 💰 Budget & Goals",
         "step2_title": "2. 👤 Current Lifestyle",
         "step3_title": "3. 🧠 Values & Passion",
-        "step4_title": "4. ⚙️ Item Review (Optional)",
+        "step4_title": "4. 🤖 AI-Recommended Items",
+        
+        # AI-recommended items display
+        "ai_recommended_items_intro": "Based on your lifestyle, values, and budget, AI has proposed 10 personalized items. If you don't want something, please delete it.",
+        "ai_recommended_no_items": "Recommended items are being prepared. They will appear once your values have been analyzed.",
+        "ai_item_card_add_btn": "Add This Item",
+        "ai_item_card_skip_btn": "Skip",
+        "ai_card_status_added": "✅ Added",
+        "ai_card_status_skipped": "❌ Skipped",
+        "ai_items_added_count": "Selected items: {count}",
+        
         "know_budget_q": "Do you know your monthly disposable budget?",
         "yes_calc": "Yes",
         "no_calc": "No, calculate it",
@@ -503,10 +546,10 @@ LANG = {
         "q_jelly_b": "B: Weekdays yes, weekends no—I still want real meals on special days.",
         "q_jelly_c": "C: Not interested—I always want to enjoy real food.",
         "q_jelly_d": "D: I'd rather save that money and spend it on other things.",
-        "freetext_q5_intro": "Q5. Share your non-negotiables, ideal lifestyle, or passions (e.g. fandom).",
-        "step3_freetext_desc": "Describe your ideal lifestyle or non-negotiable passion.",
-        "freetext_label": "Free Text (Non-negotiable passion)",
-        "freetext_placeholder": "e.g., I want to cook at home, but freedom of mobility is absolutely necessary...",
+        "freetext_q5_intro": "Q5. Finally, share your life non-negotiables, ideal lifestyle additions, and priorities.",
+        "step3_freetext_desc": "Share your life non-negotiables, ideal lifestyle additions, and priorities.",
+        "freetext_label": "Free Text (Life Priorities)",
+        "freetext_placeholder": "e.g., I want to travel internationally with family once a year. Caring for aging parents is non-negotiable. Everything else I can be flexible about.",
         "analyzing": "Analyzing...",
         "analysis_success": "AI has inferred your deep values! Fine-tune them below.",
         "analysis_fail": "AI analysis failed. Please set manually.",
@@ -517,8 +560,8 @@ LANG = {
         "use_ai_for_optimize": "🤖 Use AI to generate optimization summary",
         "ai_summary_off": "AI summary is OFF. Showing optimization results only.",
         "w_subdir": "⚖️ Value Weights (1-10)",
-        "item_review_expander": "Review AI-adjusted item list",
-        "item_review_info": "Items adjusted from your Step 2 and 2b answers.",
+        "item_review_expander": "Default Category Items & Editing",
+        "item_review_info": "Adjust priorities or costs for any items. You can also add custom items here if needed.",
         "item_list_subheader": "Browse and edit by category",
         "mandatory_label": "Mandatory",
         "col_ic": "Initial Cost",
@@ -541,7 +584,7 @@ LANG = {
         "lbl_other_fixed": "Other fixed costs ($)",
         "risk_household_caption": "Used for food-cost estimation and household scaling.",
         "lbl_age": "Your age",
-        "lbl_adults": "Adults in household",
+        "lbl_adults": "Total adults (including you)",
         "lbl_children": "Children",
         "lbl_infants": "Infants / toddlers",
         "family_summary_fmt": "Adults: {adults}, children: {children}, infants: {infants}",
@@ -602,6 +645,7 @@ LANG = {
         "warn_item_name_required": "Please enter an item name.",
         "err_category_resolve": "Could not resolve category.",
         "success_item_added": "Item added.",
+        "success_item_removed": "Item removed.",
         "item_slider_caption_mandatory": "Mandatory",
         "item_slider_suffix": "(priority 0 = excluded)",
         "lbl_mc": "Monthly ($)",
@@ -674,6 +718,15 @@ LANG = {
         "val_axis_food": "Food",
         "food_advice": "Food investment",
         "savings_advice": "Savings analysis",
+        
+        # Passion Text Input (new Step 0.5)
+        "passion_title": "✨ Tell us about yourself",
+        "passion_intro": "Share freely about your life, interests, work, location, and anything important to you. We will use AI to read your story and find items and values that are perfect for you.",
+        "passion_label": "Tell us about yourself (include your location, life situation, core values, and ideal lifestyle)",
+        "passion_guidance": "To improve diagnostic accuracy, please include where you live (country/state/city), your current life situation, core values, and ideal lifestyle in concrete terms.",
+        "passion_placeholder": "e.g.) I'm a student in Hawaii with a car. I love going to the beach on weekends and value time with friends.",
+        "extract_profile_btn": "🔍 Analyze your profile",
+        "passion_analysis_success": "✅ Profile extracted!",
     }
 }
 

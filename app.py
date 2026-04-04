@@ -1,31 +1,50 @@
 import streamlit as st
 import pandas as pd
 
-# ローカルモジュールのインポート
+# Local module imports
 import ui
 from optimizer import run_optimizer
 from lang import LANG
 from default_items import CATEGORIES, CATEGORY_CONSTRAINTS
 from risk_cost import calculate_risk_costs
 
+# New architecture imports
+from core.food_calculator import calculate_food_estimate
+from core.models import UserProfile, FoodData, FoodEstimate
+from state.session import SessionState
+from ai.profile_extractor import ProfileExtractor
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_metric_int(value, default: int = 0) -> int:
+    return int(round(_safe_float(value, float(default))))
+
 # =====================================================================
-# 初期設定・状態管理
+# Initialization and State Management
 # =====================================================================
 st.set_page_config(page_title="Life-Value Optimizer", page_icon="⚖️", layout="wide")
 
 if "lang" not in st.session_state:
-    st.session_state.lang = "ja"
+    st.session_state.lang = "en"
 
-# 翻訳辞書の取得
+# Get translation dictionary
 lang = st.session_state.lang
 T = LANG[lang]
 
-# カテゴリごとのDataFrame初期化（セッションステートで保持）
+# Initialize DataFrame for each category (stored in session state)
 if "category_dfs" not in st.session_state:
     st.session_state.category_dfs = ui.init_category_dfs()
 
 # =====================================================================
-# サイドバー（言語設定・リセット）
+# Sidebar (Language settings and reset)
 # =====================================================================
 with st.sidebar:
     st.header(f"⚙️ {T.get('sidebar_title', 'Settings')}")
@@ -40,6 +59,9 @@ with st.sidebar:
         st.rerun()
 
     if st.button(T["reset_btn"]):
+        # Clear new state management
+        SessionState.clear_all()
+        # Clear old state management
         for key in list(st.session_state.keys()):
             if key != "lang":
                 del st.session_state[key]
@@ -49,42 +71,110 @@ st.title(T["title"])
 st.caption(T.get("caption", ""))
 st.markdown(T["desc"])
 
+with st.container(border=True):
+    st.markdown(f"### {T['liability_title']}")
+    st.markdown(f"**{T['liability_prof_title']}**")
+    st.caption(T["liability_prof_body"])
+    st.markdown(f"**{T['liability_ai_title']}**")
+    st.caption(T["liability_ai_body"])
+
+ack_disclaimer = st.checkbox(T["liability_ack_label"], value=False)
+if not ack_disclaimer:
+    st.warning(T["liability_ack_required"])
+    st.stop()
+
 # =====================================================================
-# メインフロー（新UI：9つのステップ）
+# Step 0.5: Passion Text Input
+# =====================================================================
+passion_text = ui.render_passion_text_input(T)
+
+st.divider()
+
+# =====================================================================
+# Main flow (new UI: 9 steps)
 # =====================================================================
 
-# 1. 使える金額の確定 & 2. リスクコスト & 3. 収入見込み & 4. 貯金目標
-# （これらは「基本の財務設定」として1つのUI関数にまとめます）
+# 1. Confirm available budget & 2. Risk costs & 3. Income projection & 4. Savings goal
+# (These are grouped into a single UI function as the core financial setup.)
 financial_data = ui.render_financial_setup(T)
 
 st.divider()
 
-# 5. 現在のライフスタイル（Q1〜Q5）＋ 5b. 食事・外食（推定食費用）
-# 回答は dict として受け取り、後続のアイテム補正・食費推定・LLM推論に使います
+# 5. Current lifestyle (Q1-Q5) + 5b. Meals and dining out (for food cost estimation)
+# Responses are collected as a dict and used for item adjustment, food estimation, and LLM inference.
 lifestyle_data = ui.render_lifestyle_questions(T, lang)
 food_data = ui.render_food_questions(T)
 lifestyle_data["food"] = food_data
 
-# 食費推定（UI表示はしない。後続のロジック連携用に保持）
-food_estimation = ui.estimate_food_cost(financial_data["user_profile"], lifestyle_data)
+# Food cost estimation (NEW: location-aware calculation from new architecture)
+# Using the new core/food_calculator which includes location detection
+user_profile = financial_data.get("user_profile", {})
+passion_text = st.session_state.get("passion_text", "")
+
+# Create FoodData object for the calculator
+food_obj = FoodData(
+    home_meal_style=food_data.get("home_meal_style", "standard"),
+    dining_out_tone=food_data.get("dining_out_tone", "utility"),
+    dining_out_frequency=food_data.get("dining_out_frequency", "0_1"),
+    optional_alcohol=food_data.get("optional_alcohol", False),
+    optional_supplements=food_data.get("optional_supplements", False),
+    optional_special_diet=food_data.get("optional_special_diet", False),
+)
+
+# Calculate food estimate (includes location adjustment)
+# Determine family status from household composition
+adults = int(user_profile.get("household_adults", 1) or 1)
+children = int(user_profile.get("household_children", 0) or 0)
+infants = int(user_profile.get("household_infants", 0) or 0)
+total_kids = children + infants
+
+if total_kids > 0:
+    family_status = "family_with_kids"
+elif adults > 1:
+    family_status = "couple"
+else:
+    family_status = "single"
+
+user_profile_obj = UserProfile(
+    age=int(user_profile.get("age", 30) or 30),
+    family_status=family_status,
+    household_adults=adults,
+    household_children=children,
+    household_infants=infants,
+    debt_repayment=float(user_profile.get("debt_repayment", 0) or 0),
+    passion_text=passion_text,
+)
+
+food_estimate = calculate_food_estimate(user_profile_obj, food_obj, passion_text)
+food_estimation = food_estimate.to_dict()
+
+# Store in both old and new state management for compatibility
+SessionState.set_food_estimate(food_estimate)
 financial_data["estimated_food_cost"] = food_estimation
 st.session_state["estimated_food_cost"] = food_estimation
 
+print(f"🍽️ Food Estimate Calculated:")
+print(f"   minimalist_floor_cost: ${food_estimate.minimalist_floor_cost:,.2f}")
+print(f"   food_stage1_band_max: ${food_estimate.food_stage1_band_max:,.2f}")
+print(f"   food_stage2_band_max: ${food_estimate.food_stage2_band_max:,.2f}")
+print(f"   location_adjustment: {food_estimate.location_adjustment}x")
+
 st.divider()
 
-# 6. 価値観のLLM推論（ハイブリッド・プロファイリング）
-# Step 5の定型データと、ユーザーの自由記述を合わせてLLMに投げ、スライダーを自動設定します
+# 6. LLM-based value inference (hybrid profiling)
+# Combine Step 5 structured data with user free text, send to the LLM, and auto-set sliders.
+# Note: estimated_food_cost is already handled in ui/lifestyle.py render_llm_profiling.
 weights_data = ui.render_llm_profiling(T, lang, lifestyle_data, financial_data, food_data=food_data)
 
 st.divider()
 
-# 7. アイテム修正（Optional）
-# 裏側で補正されたアイテム一覧を表示し、微調整したいユーザーだけが触る画面
+# 7. Item adjustment (optional)
+# Show the internally adjusted item list for users who want fine-tuning.
 ui.render_item_review(T, lang)
 
 st.divider()
 
-# サマリー表示 & 最適化の実行
+# Display summary and run optimization
 st.header(T.get("step89_title", "5. 📊 Summary & optimization"))
 st.info(T.get("step89_intro", ""))
 use_ai_for_optimize = st.toggle(
@@ -95,10 +185,34 @@ use_ai_for_optimize = st.toggle(
 
 if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
     with st.spinner(T.get("opt_spinner", "Running optimization…")):
-        food_info = financial_data.get("estimated_food_cost", {}) or {}
+        food_info = st.session_state.get("estimated_food_cost") or financial_data.get("estimated_food_cost", {}) or {}
+        
         minimalist_floor = float(food_info.get("minimalist_floor_cost", 0) or 0)
         food_stage1_max = int(float(food_info.get("food_stage1_band_max", 0) or 0))
         food_stage2_max = int(float(food_info.get("food_stage2_band_max", 0) or 0))
+        
+        # If food_stage bands are not in AI estimate, calculate them from minimalist_floor and monthly_food_cost
+        if food_stage1_max == 0 or food_stage2_max == 0:
+            monthly_food_cost = float(food_info.get("monthly_food_cost", minimalist_floor) or minimalist_floor)
+            mid_level_cost = (minimalist_floor + monthly_food_cost) / 2
+            food_stage1_max = int(max(0, mid_level_cost - minimalist_floor))
+            food_stage2_max = int(max(0, monthly_food_cost - mid_level_cost))
+
+        # Apply budget pressure only to variable food bands.
+        # Keep minimalist_floor as-is to preserve minimum nutrition baseline.
+        monthly_budget_raw = float(financial_data.get("monthly_budget", 0) or 0)
+        monthly_food_cost = float(food_info.get("monthly_food_cost", minimalist_floor) or minimalist_floor)
+        if monthly_food_cost > 0:
+            budget_pressure = monthly_budget_raw / monthly_food_cost
+        else:
+            budget_pressure = 1.0
+        budget_pressure = max(0.6, min(1.4, budget_pressure))
+
+        stage1_scale = 0.85 + (0.15 * budget_pressure)
+        stage2_scale = budget_pressure ** 1.25
+        food_stage1_max = int(max(0, round(food_stage1_max * stage1_scale)))
+        food_stage2_max = int(max(0, round(food_stage2_max * stage2_scale)))
+        
         base_monthly_after_food = max(
             0,
             int(financial_data["monthly_budget"]) - int(round(minimalist_floor)),
@@ -139,18 +253,31 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                 f"(base ${base_monthly_after_food:,} - risk ${risk_monthly_total:,})"
             )
 
-        # 最適化エンジンに渡す全候補アイテムのリストを構築
+        # Build the complete list of candidate items for the optimization engine
         candidates = []
+        prefer_car_soft_bonus = bool(st.session_state.get("prefer_car_soft_bonus", False))
+        prefer_car_soft_bonus_value = int(st.session_state.get("prefer_car_soft_bonus_value", 30000) or 0)
         for cat, df in st.session_state.category_dfs.items():
             for idx, row in df.iterrows():
-                # UI側のセッションステート（スライダー等の値）から最新の状態を取得
+                # Get the latest state from UI session state (slider values, etc.)
                 pri = st.session_state.get(f"priority_{cat}_{idx}", row["priority"])
                 mand = st.session_state.get(f"mandatory_{cat}_{idx}", row["mandatory"])
                 ic = st.session_state.get(f"initial_cost_{cat}_{idx}", row["initial_cost"])
                 mc = st.session_state.get(f"monthly_cost_{cat}_{idx}", row["monthly_cost"])
+                source = row.get("source", "default")
+                safe_ic = int(max(0, _safe_float(ic, 0)))
+                safe_mc = int(max(0, _safe_float(mc, 0)))
                 
-                # 優先度0は除外。ただし必須指定は候補に残す
+                # Exclude priority 0 items, but keep mandatory items as candidates
                 if pri > 0 or mand:
+                    soft_bonus = 0
+                    if (
+                        prefer_car_soft_bonus
+                        and cat == "transport"
+                        and (row.get("name_ja") == "車メイン" or row.get("name_en") == "Car (Primary)")
+                    ):
+                        soft_bonus = max(0, prefer_car_soft_bonus_value)
+
                     candidates.append({
                         "id": f"{cat}_{idx}",
                         "name": row["name"],
@@ -159,12 +286,14 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                         "category": cat,
                         "priority": pri,
                         "mandatory": mand,
-                        "initial_cost": ic,
-                        "monthly_cost": mc,
-                        "health": row["health"],
-                        "connections": row["connections"],
-                        "freedom": row["freedom"],
-                        "growth": row["growth"]
+                        "initial_cost": safe_ic,
+                        "monthly_cost": safe_mc,
+                        "health": _safe_metric_int(row.get("health", 0), 0),
+                        "connections": _safe_metric_int(row.get("connections", 0), 0),
+                        "freedom": _safe_metric_int(row.get("freedom", 0), 0),
+                        "growth": _safe_metric_int(row.get("growth", 0), 0),
+                        "source": source,  # Preserve source field
+                        "soft_bonus": soft_bonus,
                     })
 
         result = None
@@ -199,6 +328,15 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                     require_transport=require_transport,
                 )
 
+            def _surplus_car_bonus_delta(surplus_value: float) -> int:
+                if surplus_value > 600:
+                    return 15000
+                if surplus_value > 300:
+                    return 10000
+                if surplus_value > 100:
+                    return 5000
+                return 0
+
             mandatory_ids = [c["id"] for c in candidates if c.get("mandatory")]
             working = candidates
             mandatory_relaxed_applied = False
@@ -226,6 +364,53 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                 if result.get("status") == "ok":
                     result["best_effort_transport_optional"] = True
 
+            if result.get("status") == "ok" and prefer_car_soft_bonus:
+                if result.get("best_effort_transport_optional"):
+                    current_fs1_cap = 0
+                    current_fs2_cap = 0
+                    current_require_transport = False
+                elif result.get("best_effort_zero_food_stages"):
+                    current_fs1_cap = 0
+                    current_fs2_cap = 0
+                    current_require_transport = True
+                else:
+                    current_fs1_cap = food_stage1_max
+                    current_fs2_cap = food_stage2_max
+                    current_require_transport = True
+
+                actual_savings_now = float(result.get("actual_monthly_savings", 0) or 0)
+                stage1_used_now = float(result.get("food_stage1_monthly_cost", 0) or 0)
+                stage1_unfilled = max(0.0, float(current_fs1_cap) - stage1_used_now)
+                surplus_value = actual_savings_now - float(tms) - stage1_unfilled
+                extra_bonus = _surplus_car_bonus_delta(surplus_value)
+
+                if extra_bonus > 0:
+                    boosted_working = []
+                    for item in working:
+                        it = dict(item)
+                        if (
+                            it.get("category") == "transport"
+                            and (it.get("name_ja") == "車メイン" or it.get("name_en") == "Car (Primary)")
+                        ):
+                            it["soft_bonus"] = int(it.get("soft_bonus", 0) or 0) + extra_bonus
+                        boosted_working.append(it)
+
+                    boosted_result = _run_opt(
+                        boosted_working,
+                        current_fs1_cap,
+                        current_fs2_cap,
+                        current_require_transport,
+                    )
+                    if boosted_result.get("status") == "ok":
+                        if result.get("best_effort_zero_food_stages"):
+                            boosted_result["best_effort_zero_food_stages"] = True
+                        if result.get("best_effort_transport_optional"):
+                            boosted_result["best_effort_transport_optional"] = True
+                        result = boosted_result
+                        working = boosted_working
+                        result["car_surplus_bonus_applied"] = extra_bonus
+                        result["car_surplus_value"] = surplus_value
+
             if (
                 result.get("status") == "ok"
                 and mandatory_relaxed_applied
@@ -240,7 +425,7 @@ if st.button(T["run_opt_btn"], type="primary", use_container_width=True):
                 result["missed_mandatory_count"] = len(missed_ids)
                 result["missed_mandatory_items"] = missed_items
 
-        # 結果の描画（AIライフコーチダッシュボード含む）
+        # Render results (including the AI life-coach dashboard)
         if result is not None:
             ui.render_risk_and_results(
                 result,

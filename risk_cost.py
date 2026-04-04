@@ -1,7 +1,7 @@
 # risk_cost.py
-# 現実的コスト予測テーブル（月次・USD）
-# 医療費 = 保険でカバーされない自己負担分（コプレイ・免責）
-# horizon_years依存を廃止し固定値を使用
+# Realistic cost forecast table (monthly, USD)
+# Medical cost = out-of-pocket amount not covered by insurance (copay/deductible)
+# Removed horizon_years dependency and use fixed values
 
 MEDICAL = {
     "18-35": {"single": 50,  "couple": 100, "kids1": 150, "kids2": 200, "kids3": 250, "kids4": 300},
@@ -10,7 +10,7 @@ MEDICAL = {
     "66+":   {"single": 400, "couple": 800, "kids1": 850, "kids2": 900, "kids3": 950, "kids4": 1000},
 }
 
-# 固定値（中央値相当）
+# Fixed values (roughly median-level)
 HOUSING_DEFAULT   = 80
 CAR_REPAIR_DEFAULT = 80
 
@@ -70,8 +70,8 @@ def calculate_risk_costs(
     car_selected: bool,
 ) -> list[dict]:
     """
-    savings_period_yearsは教育費の計算にのみ使用
-    住居修繕費・車の修理費は固定値（中央値）を使用
+    savings_period_years is used only for education-cost calculation.
+    Housing repair and car repair use fixed (median-like) values.
     """
     age_band = get_age_band(age)
     family_key, num_kids = get_family_key(family)
@@ -87,7 +87,7 @@ def calculate_risk_costs(
                       "monthly_cost": CAR_REPAIR_DEFAULT})
 
     if num_kids > 0:
-        # 教育費は貯蓄期間に依存
+        # Education cost depends on the savings period
         edu_key = min(savings_period_years, 20,
                       key=lambda y: abs(y - savings_period_years))
         valid_keys = [1, 5, 10, 20, 50]

@@ -1,6 +1,14 @@
 from ortools.sat.python import cp_model
 
 
+def _metric_int(item: dict, key: str, default: int = 0) -> int:
+    value = item.get(key, default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def food_related_score(item: dict) -> int:
     """
     食生活に結びつきやすいアイテムほど高いスコア（0〜20程度）。
@@ -45,17 +53,40 @@ def _calc_priority_weights(candidates: list[dict]) -> list[float]:
     return weights
 
 def _base_utility(item: dict, weights: dict) -> int:
-    # 【修正】すべてのスコアに +10 を加算し、マイナス効用による無条件除外バグを防止
+    # Fix: Prevent unconditional exclusion bugs due to negative utilities by adding +10 to all scores
     fw = int(weights.get("food", 5))
     fr = food_related_score(item)
     food_term = fw * (fr + 10) * 40
     return (
-        weights["health"]      * (int(item["health"]) + 10)      * 100 +
-        weights["connections"] * (int(item["connections"]) + 10) * 100 +
-        weights["freedom"]     * (int(item["freedom"]) + 10)     * 100 +
-        weights["growth"]      * (int(item["growth"]) + 10)      * 100
+        weights["health"]      * (_metric_int(item, "health", 0) + 10)      * 100 +
+        weights["connections"] * (_metric_int(item, "connections", 0) + 10) * 100 +
+        weights["freedom"]     * (_metric_int(item, "freedom", 0) + 10)     * 100 +
+        weights["growth"]      * (_metric_int(item, "growth", 0) + 10)      * 100
         + food_term
     )
+
+
+def _satisfaction_item_score(item: dict, weights: dict) -> int:
+    # Satisfaction is source-agnostic (default/AI) and treats missing metrics as neutral (0).
+    h = max(0, _metric_int(item, "health", 0) + 10)
+    c = max(0, _metric_int(item, "connections", 0) + 10)
+    f = max(0, _metric_int(item, "freedom", 0) + 10)
+    g = max(0, _metric_int(item, "growth", 0) + 10)
+    score = (
+        int(weights.get("health", 5)) * h * 15
+        + int(weights.get("connections", 5)) * c * 15
+        + int(weights.get("freedom", 5)) * f * 15
+        + int(weights.get("growth", 5)) * g * 15
+    )
+
+    # Transport is a single-choice category, so reflect lived-experience fit more strongly.
+    if (item.get("category", "") or "") == "transport":
+        score += (
+            int(weights.get("freedom", 5)) * f * 18
+            + int(weights.get("connections", 5)) * c * 14
+        )
+
+    return score
 
 def run_optimizer(
     items: list[dict],
@@ -78,7 +109,11 @@ def run_optimizer(
     n = len(candidates)
     priority_weights_int = [int(w * 100) for w in _calc_priority_weights(candidates)]
     base_utils           = [_base_utility(item, weights) for item in candidates]
-    utilities            = [(base_utils[i] * priority_weights_int[i]) // 100 for i in range(n)]
+    utilities            = [
+        ((base_utils[i] * priority_weights_int[i]) // 100)
+        + int(candidates[i].get("soft_bonus", 0) or 0)
+        for i in range(n)
+    ]
 
     model = cp_model.CpModel()
     x     = [model.NewBoolVar(f"x_{i}") for i in range(n)]
@@ -87,13 +122,15 @@ def run_optimizer(
         if item.get("mandatory", False):
             model.Add(x[i] == 1)
 
-    model.Add(sum(x[i] * candidates[i]["initial_cost"] for i in range(n)) <= total_budget)
+    # Convert costs to integers to avoid float constraint issue
+    model.Add(sum(x[i] * int(candidates[i]["initial_cost"]) for i in range(n)) <= total_budget)
     food_stage1_max = max(int(food_stage1_max or 0), 0)
     food_stage2_max = max(int(food_stage2_max or 0), 0)
     food_stage1_var = model.NewIntVar(0, food_stage1_max, "food_stage1_var")
     food_stage2_var = model.NewIntVar(0, food_stage2_max, "food_stage2_var")
+    # Convert costs to integers to avoid float constraint issue
     model.Add(
-        sum(x[i] * candidates[i]["monthly_cost"] for i in range(n))
+        sum(x[i] * int(candidates[i]["monthly_cost"]) for i in range(n))
         + food_stage1_var
         + food_stage2_var
         <= monthly_budget
@@ -122,11 +159,14 @@ def run_optimizer(
             model.Add(x[ci] <= sum(x[i] for i in car_primary_idx)) if car_primary_idx else model.Add(x[ci] == 0)
 
     items_value = sum(x[i] * utilities[i] for i in range(n))
+    satisfaction_scores = [_satisfaction_item_score(item, weights) for item in candidates]
+    satisfaction_items_value = sum(x[i] * satisfaction_scores[i] for i in range(n))
 
     total_monthly_cost_var = model.NewIntVar(0, monthly_budget, "total_monthly_cost")
+    # Convert costs to integers to avoid float constraint issue
     model.Add(
         total_monthly_cost_var
-        == sum(x[i] * candidates[i]["monthly_cost"] for i in range(n))
+        == sum(x[i] * int(candidates[i]["monthly_cost"]) for i in range(n))
         + food_stage1_var
         + food_stage2_var
     )
@@ -135,13 +175,13 @@ def run_optimizer(
 
     total_max_utility = sum(utilities)
     
-    # 【修正】割り算をfloatで行い、重みが0より大きければ必ず係数が1以上になるように安全措置を追加
+    # Fix: Safely use float division, ensuring multiplier is at least >= 1 when weight > 0
     _raw_savings_coefficient = (total_max_utility * weights["savings"]) / (10 * max(monthly_budget, 1))
     savings_coefficient = max(1 if weights["savings"] > 0 else 0, int(_raw_savings_coefficient))
     
-    # 貯蓄の効用は「目標達成分」だけを強く評価する。
-    # 目標超過分まで同じ係数で伸びると、余剰があっても Stage2（贅沢枠）より
-    # 「さらに貯める」方向に目的関数が寄り、Stage2 が常に 0 になりやすい。
+    # Utility of savings heavily focuses only on the target achievement part.
+    # If overachieved parts linearly scale the same way, the objective function
+    # skews towards 'save more' over Stage2 (Upgrade), resulting in Stage2 often being 0.
     if target_monthly_savings > 0:
         ts = model.NewIntVar(0, monthly_budget, "target_monthly_savings_fixed")
         model.Add(ts == target_monthly_savings)
@@ -153,15 +193,15 @@ def run_optimizer(
         savings_value = model.NewIntVar(0, int(monthly_budget * savings_coefficient) + 1, "savings_value")
         model.Add(savings_value == actual_savings_var * savings_coefficient)
 
-    # ===== 食の2段階モデルを目的関数に反映 =====
-    # Stage1: C_min -> C_survey（“希望水準まで到達”を強く促す）
-    # Stage2: C_survey -> C_max（“食の重み”に比例して贅沢アップグレード）
+    # ===== Reflect 2-stage food model in the objective function =====
+    # Stage1: C_min -> C_survey (Strongly encourage reaching the requested standard)
+    # Stage2: C_survey -> C_max (Luxury upgrade proportional to 'food weight')
     food_weight = max(int(weights.get("food", 5) or 0), 1)
-    # food_weight(1-10)に応じてStage1の強制度を可変化
-    # 低ウェイト: できれば埋める / 高ウェイト: ほぼ最優先で埋める
+    # Vary strictness of Stage1 realization based on food_weight(1-10)
+    # Low weight: Fulfill if possible / High weight: Fulfill with top priority
     _fw_norm = (food_weight - 1) / 9.0  # 0.0 .. 1.0
     FOOD_STAGE1_VALUE_PER_DOLLAR = int(80 + 560 * _fw_norm)  # 80 .. 640
-    FOOD_STAGE2_VALUE_PER_DOLLAR_BASE = 32  # Stage2は食の重みに比例
+    FOOD_STAGE2_VALUE_PER_DOLLAR_BASE = 24  # Stage2は食の重みに比例
 
     food_stage1_value_var = model.NewIntVar(
         0,
@@ -180,8 +220,8 @@ def run_optimizer(
         == food_stage2_var * food_weight * FOOD_STAGE2_VALUE_PER_DOLLAR_BASE
     )
 
-    # Stage1（希望水準まで）は最優先で満たす。
-    # 予算制約で満たせない場合のみ不足を許容し、不足額に強いペナルティを課す。
+    # Fulfill Stage1 (up to requested standard) with absolute priority.
+    # Allow deficiency only if restricted by budget constraint, penalizing the unfulfilled amount.
     food_stage1_deficit_var = model.NewIntVar(0, food_stage1_max, "food_stage1_deficit")
     model.Add(food_stage1_deficit_var == food_stage1_max - food_stage1_var)
     FOOD_STAGE1_DEFICIT_PENALTY = int(5000 + 95000 * _fw_norm)  # 5,000 .. 100,000
@@ -231,8 +271,10 @@ def run_optimizer(
     # =====================================================================
     # Update Objective Function: Maximize (Total Utility + Savings Value - Total Penalty)
     # =====================================================================
+    satisfaction_weight = 3
     model.Maximize(
         items_value
+        + (satisfaction_items_value * satisfaction_weight)
         + savings_value
         + food_stage1_value_var
         + food_stage2_value_var
@@ -256,6 +298,7 @@ def run_optimizer(
             "selected":              selected,
             "total_initial_cost":    total_initial,
             "total_monthly_cost":    total_monthly,
+            "satisfaction_score":    sum(_satisfaction_item_score(item, weights) for item in selected),
             "food_stage1_monthly_cost": solver.Value(food_stage1_var),
             "food_stage2_monthly_cost": solver.Value(food_stage2_var),
             "food_stage1_deficit": solver.Value(food_stage1_deficit_var),
