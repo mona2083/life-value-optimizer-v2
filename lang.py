@@ -113,6 +113,8 @@ LANG = {
         "ai_recommended_no_items": "推奨アイテムは準備中です。価値観の分析が完了してから表示されます。",
         "ai_item_card_add_btn": "このアイテムを追加",
         "ai_item_card_skip_btn": "スキップ",
+        "ai_card_status_added": "✅ 追加済み",
+        "ai_card_status_skipped": "❌ スキップ済み",
         "ai_items_added_count": "選択したアイテム: {count}個",
         
         # 予算入力
@@ -474,6 +476,8 @@ LANG = {
         "ai_recommended_no_items": "Recommended items are being prepared. They will appear once your values have been analyzed.",
         "ai_item_card_add_btn": "Add This Item",
         "ai_item_card_skip_btn": "Skip",
+        "ai_card_status_added": "✅ Added",
+        "ai_card_status_skipped": "❌ Skipped",
         "ai_items_added_count": "Selected items: {count}",
         
         "know_budget_q": "Do you know your monthly disposable budget?",

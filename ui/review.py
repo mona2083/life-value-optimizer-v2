@@ -33,12 +33,21 @@ def render_item_review(T, lang):
                 col1, col2 = st.columns([3, 1])
                 
                 with col1:
-                    status = "❌ SKIPPED" if is_skipped else "✅ ADDED"
-                    st.markdown(f"**{display_name}**  \n初期: ${initial} / 月額: ${monthly}  \n*{status}*")
+                    status = (
+                        T.get("ai_card_status_skipped", "❌ Skipped")
+                        if is_skipped
+                        else T.get("ai_card_status_added", "✅ Added")
+                    )
+                    st.markdown(
+                        f"**{display_name}**  \n"
+                        f"{T.get('col_ic', 'Initial Cost')}: ${initial} / "
+                        f"{T.get('col_mc', 'Monthly Cost')}: ${monthly}  \n"
+                        f"*{status}*"
+                    )
                 
                 with col2:
                     if is_skipped:
-                        if st.button(T.get("ai_add_btn", "Add"), key=f"add_{idx}"):
+                        if st.button(T.get("ai_item_card_add_btn", "Add"), key=f"add_{idx}"):
                             st.session_state.skipped_ai_items.discard(idx)
                             # Re-add to category_dfs
                             if category in st.session_state.category_dfs:
@@ -64,7 +73,7 @@ def render_item_review(T, lang):
                                 )
                             st.rerun()
                     else:
-                        if st.button(T.get("ai_skip_btn", "Skip"), key=f"skip_{idx}"):
+                        if st.button(T.get("ai_item_card_skip_btn", "Skip"), key=f"skip_{idx}"):
                             st.session_state.skipped_ai_items.add(idx)
                             # Remove from category_dfs
                             if category in st.session_state.category_dfs:
@@ -125,7 +134,8 @@ def render_item_review(T, lang):
                 if is_mandatory and st.session_state.get(pri_key, 0) <= 0:
                     st.session_state[pri_key] = 1
             with c1:
-                lbl = f"{row['name']} {T.get('item_slider_suffix', '')}"
+                display_row_name = (row.get("name_ja", "") if lang == "ja" else row.get("name_en", "")) or row.get("name", "")
+                lbl = f"{display_row_name} {T.get('item_slider_suffix', '')}"
                 if st.session_state[mand_key]:
                     st.caption("✅ " + T.get("item_slider_caption_mandatory", "Must have (Cannot be excluded)"))
                 st.slider(lbl, 0, 10, key=pri_key, on_change=_mark_manual, args=(pri_key,))

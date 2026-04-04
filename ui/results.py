@@ -235,7 +235,7 @@ def render_risk_and_results(
                     f"${int(initial_left):,}",
                 )
             if lang == "ja":
-                st.caption(f"💡 初期費内訳：予算(\\${int(initial_budget):,}) = Used(\\${int(initial_used):,}) + Remaining(\\${int(initial_left):,})")
+                st.caption(f"💡 初期費内訳：予算(\\${int(initial_budget):,}) = 使用額(\\${int(initial_used):,}) + 残額(\\${int(initial_left):,})")
             else:
                 st.caption(f"💡 Initial breakdown: Budget(\\${int(initial_budget):,}) = Used(\\${int(initial_used):,}) + Left(\\${int(initial_left):,})")
 
@@ -255,7 +255,7 @@ def render_risk_and_results(
                     f"{monthly_rate_raw:.0%}",
                 )
             if lang == "ja":
-                st.caption(f"💡 貯蓄内訳：目標額(\\${int(target_monthly):,}) achievement rate")
+                st.caption(f"💡 貯蓄内訳：目標額(\\${int(target_monthly):,})に対する達成率")
             else:
                 st.caption(f"💡 Savings breakdown: Achievement vs Target(\\${int(target_monthly):,})")
 
@@ -769,7 +769,7 @@ def render_risk_and_results(
                     f"${int(initial_left):,}",
                 )
             if lang == "ja":
-                st.caption(f"💡 初期費内訳：予算(\\${int(initial_budget):,}) = Used(\\${int(initial_used):,}) + Remaining(\\${int(initial_left):,})")
+                st.caption(f"💡 初期費内訳：予算(\\${int(initial_budget):,}) = 使用額(\\${int(initial_used):,}) + 残額(\\${int(initial_left):,})")
             else:
                 st.caption(f"💡 Initial breakdown: Budget(\\${int(initial_budget):,}) = Used(\\${int(initial_used):,}) + Left(\\${int(initial_left):,})")
 
@@ -789,7 +789,7 @@ def render_risk_and_results(
                     f"{monthly_rate_raw:.0%}",
                 )
             if lang == "ja":
-                st.caption(f"💡 貯蓄内訳：目標額(\\${int(target_monthly):,}) achievement rate")
+                st.caption(f"💡 貯蓄内訳：目標額(\\${int(target_monthly):,})に対する達成率")
             else:
                 st.caption(f"💡 Savings breakdown: Achievement vs Target(\\${int(target_monthly):,})")
 
