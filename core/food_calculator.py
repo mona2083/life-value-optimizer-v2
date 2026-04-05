@@ -75,13 +75,6 @@ def calculate_food_estimate(
     food_stage1_band_max = max(0.0, estimated - minimalist_floor)
     food_stage2_band_max = max(0.0, max_possible - estimated)
     
-    # Debug output
-    print(f"🔍 calculate_food_estimate() DEBUG:")
-    print(f"   base_component={base_component:.2f}, adult_equiv={adult_equivalent:.2f}")
-    print(f"   scale={scale_adjust}, location_adj={location_adjustment}")
-    print(f"   minimalist_floor={minimalist_floor:.2f}, estimated={estimated:.2f}")
-    print(f"   stage1_band_max={food_stage1_band_max:.2f}, stage2_band_max={food_stage2_band_max:.2f}")
-    
     # Create and return the estimate
     return FoodEstimate(
         monthly_food_cost=round(estimated, 2),

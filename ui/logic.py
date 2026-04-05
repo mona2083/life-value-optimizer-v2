@@ -110,12 +110,6 @@ def normalize_all_item_costs(financial_data: dict, debug: bool = False) -> None:
             if not st.session_state.get(f"manual_{monthly_state_key}", False):
                 st.session_state[monthly_state_key] = norm_mc
 
-            if debug and (norm_ic != int(_safe_float(base_ic, 0)) or norm_mc != int(_safe_float(base_mc, 0))):
-                print(
-                    f"[item-normalize] cat={cat} source={source} idx={idx} "
-                    f"ic:{int(_safe_float(base_ic, 0))}->{norm_ic} mc:{int(_safe_float(base_mc, 0))}->{norm_mc}"
-                )
-
         st.session_state.category_dfs[cat] = df
 
 def dict_get_or_zero(d, key):
