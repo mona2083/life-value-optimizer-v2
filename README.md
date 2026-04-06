@@ -8,7 +8,7 @@ A Streamlit app that helps users make intentional spending decisions by balancin
 
 ## Live Demo
 
-🔗 [Open App](https://life-value-optimizer-mh.streamlit.app/)
+🔗 [Open App](https://life-value-optimizer-v2-86yhdnhbeqkh5yhhev7zru.streamlit.app/)
 
 ---
 
