@@ -30,8 +30,6 @@ def _safe_metric_int(value, default: int = 0) -> int:
 # =====================================================================
 # Initialization and State Management
 # =====================================================================
-st.set_page_config(page_title="Life-Value Optimizer", page_icon="⚖️", layout="wide")
-
 if "lang" not in st.session_state:
     st.session_state.lang = "en"
 
@@ -48,15 +46,6 @@ if "category_dfs" not in st.session_state:
 # =====================================================================
 with st.sidebar:
     st.header(f"⚙️ {T.get('sidebar_title', 'Settings')}")
-    new_lang = st.radio(
-        T.get("sidebar_language", "Language"),
-        ["ja", "en"],
-        index=0 if lang == "ja" else 1,
-        format_func=lambda c: "日本語" if c == "ja" else "English",
-    )
-    if new_lang != lang:
-        st.session_state.lang = new_lang
-        st.rerun()
 
     if st.button(T["reset_btn"]):
         # Clear new state management
