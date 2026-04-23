@@ -13,3 +13,6 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+transactions.db
+spending_rules.json

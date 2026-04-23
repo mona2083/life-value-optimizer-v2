@@ -3,6 +3,8 @@ import pandas as pd
 import json
 import re
 import unicodedata
+import sqlite3
+import difflib
 import plotly.express as px
 import os
 
@@ -34,8 +36,8 @@ LANG = {
         "agg_yearly": "Yearly",
         "trend_title": "Spending Trend",
         "trend_filter_cat": "Filter Categories",
-        "unclass_title": "❓ Resolve Unclassified (other)",
-        "unclass_desc": "Assign categories to these top unclassified merchants to train the system.",
+        "unclass_title": "❓ Resolve Unclassified (Assign or Merge)",
+        "unclass_desc": "For each unclassified merchant, you can assign a new category OR merge it into an existing one. AI fuzzy-match suggestions are pre-filled where possible.",
         "unclass_all_done": "✅ All items are successfully classified!",
         "rules_mgmt_title": "📚 Rule Management",
         "rules_mgmt_desc": "Edit, add, or delete rules. Grouped by category and sorted alphabetically.",
@@ -58,6 +60,24 @@ LANG = {
         "rule_category": "Category",
         "merchant_trend_title": "Merchant Spending Trend",
         "merchant_filter_label": "Select Merchants (Recurring Only)",
+        "import_title": "📥 Import New Data",
+        "pm_label": "Payment Method / Account for '{filename}'",
+        "save_db_btn": "💾 Process & Save to Database",
+        "db_reset_title": "🗑️ Reset Database",
+        "db_reset_desc": "Delete all imported data from the database and local CSV backup. This action cannot be undone.",
+        "db_reset_btn": "⚠️ Delete All Data",
+        "db_empty_msg": "No data available. Please upload CSV files above to start building your master database.",
+        "pm_filter_label": "Filter by Payment Method",
+        "all_pms": "All Payment Methods",
+        "import_success": "Successfully added {count} new records to the database!",
+        "apply_cat_btn": "✓ Save Category",
+        "apply_merge_btn": "🔗 Save Merge",
+        "merge_suggest_label": "Merge Target (Auto-suggested)",
+        "alias_mgmt_title": "🔗 Alias Management (Edit Merges)",
+        "alias_mgmt_desc": "Directly view, edit, or delete how name variations are merged.",
+        "col_variation": "Variation (Raw)",
+        "col_target": "Target (Canonical)",
+        "save_aliases_btn": "💾 Save Aliases",
     },
     "ja": {
         "title": "📊 支出アナライザー",
@@ -83,8 +103,8 @@ LANG = {
         "agg_yearly": "年別",
         "trend_title": "支出推移トレンド",
         "trend_filter_cat": "カテゴリで絞り込み",
-        "unclass_title": "❓ 未分類データの解決（other）",
-        "unclass_desc": "以下の店舗にカテゴリを割り当てると、ルールとして学習・保存されます。（金額が大きい順トップ10）",
+        "unclass_title": "❓ 未分類データの解決（カテゴリ割当 or マージ）",
+        "unclass_desc": "未分類の店舗に対して、新しいカテゴリを割り当てるか、既存の店舗名に結合（マージ）できます。類似店舗が見つかった場合は自動で提案・入力されます。",
         "unclass_all_done": "✅ すべての店舗が分類されています！",
         "rules_mgmt_title": "📚 カテゴリルールの管理・編集",
         "rules_mgmt_desc": "カテゴリごとにタブで分かれています。アルファベット順に表示された店舗名を直接編集・追加・削除できます。",
@@ -107,6 +127,24 @@ LANG = {
         "rule_category": "カテゴリ",
         "merchant_trend_title": "店舗別支出推移トレンド",
         "merchant_filter_label": "店舗を選択（複数回利用のみ）",
+        "import_title": "📥 新しいデータのインポート",
+        "pm_label": "「{filename}」の支払い方法・口座名",
+        "save_db_btn": "💾 処理してデータベースに保存",
+        "db_reset_title": "🗑️ データベースの初期化",
+        "db_reset_desc": "データベースとローカルのCSVバックアップからすべてのデータを削除します。この操作は元に戻せません。",
+        "db_reset_btn": "⚠️ すべてのデータを削除",
+        "db_empty_msg": "データがありません。上のメニューからCSVファイルをアップロードして、マスターデータベースを構築してください。",
+        "pm_filter_label": "支払い方法で絞り込み",
+        "all_pms": "すべての支払い方法",
+        "import_success": "{count}件の新しいトランザクションをデータベースに追加しました！",
+        "apply_cat_btn": "✓ カテゴリを保存",
+        "apply_merge_btn": "🔗 結合（マージ）を保存",
+        "merge_suggest_label": "統合後の名前（自動提案）",
+        "alias_mgmt_title": "🔗 類似店舗マージ設定の管理",
+        "alias_mgmt_desc": "現在どの表記揺れがどの名前に統合されているかを一覧で確認・直接編集・削除できます。",
+        "col_variation": "表記揺れ（元の名前）",
+        "col_target": "統合後の名前",
+        "save_aliases_btn": "💾 マージ設定を保存",
     }
 }
 
@@ -123,6 +161,31 @@ if "ignored_subs" not in st.session_state:
     st.session_state.ignored_subs = []
 if "monthly_budget" not in st.session_state:
     st.session_state.monthly_budget = 2000
+
+# =====================================================================
+# Database Initialization (SQLite)
+# =====================================================================
+DB_PATH = os.path.join(os.path.dirname(__file__), "transactions.db")
+CSV_BACKUP_PATH = os.path.join(os.path.dirname(__file__), "master_transactions.csv")
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT,
+            desc TEXT,
+            amount REAL,
+            income REAL,
+            payment_method TEXT,
+            UNIQUE(date, desc, amount)
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_db()
 
 # =====================================================================
 # Load Spending Rules (Config)
@@ -182,20 +245,25 @@ def assign_category_and_name(desc: str, mapping_rules: dict, aliases: dict):
     desc_lower = str(desc).lower()
     
     # 1. 表記揺れ（エイリアス）の吸収
-    sorted_aliases = sorted(aliases.keys(), key=len, reverse=True)
+    sorted_aliases = sorted(aliases.keys(), key=lambda x: len(str(x)), reverse=True)
     for alias in sorted_aliases:
-        if alias in desc_lower:
-            desc_lower = aliases[alias]
+        al_lower = str(alias).lower()
+        # 通常の部分一致、または記号を取り除いた状態での完全一致（日本語も安全に維持）
+        if al_lower in desc_lower or re.sub(r'[^\w]', '', al_lower) == re.sub(r'[^\w]', '', desc_lower):
+            desc_lower = str(aliases[alias]).lower()
             break
             
     # 2. ルールマッチと店舗名の名寄せ（統一）
-    sorted_keywords = sorted(mapping_rules.keys(), key=len, reverse=True)
+    sorted_keywords = sorted(mapping_rules.keys(), key=lambda x: len(str(x)), reverse=True)
     for keyword in sorted_keywords:
-        if keyword.lower() in desc_lower:
+        kw_lower = str(keyword).lower()
+        if kw_lower in desc_lower or re.sub(r'[^\w]', '', kw_lower) == re.sub(r'[^\w]', '', desc_lower):
             canon_name = " ".join(w.capitalize() for w in keyword.split())
             return canon_name, mapping_rules[keyword]
             
-    return desc, "other"
+    # 見つからなければ、整形してotherとして返す
+    canon_name = " ".join(w.capitalize() for w in desc_lower.split())
+    return canon_name, "other"
 
 def is_excluded_transaction(desc: str) -> bool:
     """Identify internal transfers and credit card payments to exclude."""
@@ -263,6 +331,9 @@ def clean_description(desc: str) -> str:
 
     # 12. 米国の州コードの削除 (例: CA, HI)
     d = re.sub(r'(?i)\s+[a-z]{2}$', '', d)
+    
+    # 12.5 法人格の削除 (LLC, INC, CORP, LTD, COMPANY)
+    d = re.sub(r'(?i)\b(?:llc|inc|corp|ltd|company)\b', '', d)
 
     # 13. 連続する空白の処理: 2つ以上連続する空白がある場合、それ以降は場所名などのノイズとみなして削除
     if '  ' in d:
@@ -272,327 +343,425 @@ def clean_description(desc: str) -> str:
     
     return d if d else orig
 
-# =====================================================================
-# File Upload & Analysis
-# =====================================================================
-uploaded_file = st.file_uploader(T["upload_label"], type=["csv"])
-
-if uploaded_file is not None:
-    try:
-        # Robust loading: attempt multiple encodings for varied bank CSVs (e.g., Shift-JIS in Japan)
+def process_and_save_files(files, configs):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    new_rows = 0
+    
+    for f in files:
+        pm = configs[f.name]
         encodings_to_try = ['utf-8', 'shift_jis', 'cp932', 'latin1']
         raw_df = None
         
         for enc in encodings_to_try:
             try:
-                uploaded_file.seek(0) # Reset file pointer before each read attempt
-                raw_df = pd.read_csv(uploaded_file, encoding=enc)
-                break # Success
+                f.seek(0)
+                raw_df = pd.read_csv(f, encoding=enc)
+                break
             except UnicodeDecodeError:
                 continue
                 
         if raw_df is None:
-            raise ValueError("Could not decode the CSV file. Please ensure it is saved in UTF-8 or Shift-JIS format.")
+            st.error(f"Could not decode {f.name}")
+            continue
             
         df = normalize_dataframe(raw_df)
         
         if not {'date', 'desc', 'amount'}.issubset(df.columns):
-            missing = {'date', 'desc', 'amount'} - set(df.columns)
-            found_cols = list(raw_df.columns)
-            st.error(f"{T['col_error']}\n\n**Missing mapped columns:** {missing}\n\n**Found CSV columns:** {found_cols}")
-            st.stop()
+            st.warning(f"Skipping {f.name}: Missing required columns.")
+            continue
             
-        # Filter exclusions and clean descriptions
         df = df[~df['desc'].apply(is_excluded_transaction)].copy()
         df['desc'] = df['desc'].apply(clean_description)
-            
-        # Clean and type conversion for Amount & Income
+        
         df['amount'] = pd.to_numeric(df['amount'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce')
         if 'income' in df.columns:
             df['income'] = pd.to_numeric(df['income'].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce')
         else:
             df['income'] = 0.0
-            # Assume negative amount is income (refund/deposit)
             df.loc[df['amount'] < 0, 'income'] = df['amount'].abs()
             df.loc[df['amount'] < 0, 'amount'] = 0.0
-        
-        # Clean and type conversion for Date (handles standard and Japanese YYYY年MM月DD日 formats)
+            
         date_str = df['date'].astype(str).str.replace(r'[年月]', '/', regex=True).str.replace(r'日', '', regex=True)
         df['date'] = pd.to_datetime(date_str, errors='coerce')
         
-        # Drop invalid rows
         df = df.dropna(subset=['date'])
         df['amount'] = df['amount'].fillna(0).abs()
         df['income'] = df['income'].fillna(0).abs()
         
-        # Extract Year and Month for filtering
-        df['year'] = df['date'].dt.year.astype(str)
-        df['month'] = df['date'].dt.month.astype(str).str.zfill(2)
-        df['year_month'] = df['date'].dt.strftime('%Y-%m')
+        for _, row in df.iterrows():
+            d_val = row['date'].strftime('%Y-%m-%d')
+            desc_val = str(row['desc'])
+            amt_val = float(row['amount'])
+            inc_val = float(row['income'])
+            
+            try:
+                c.execute('''
+                    INSERT INTO transactions (date, desc, amount, income, payment_method)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (d_val, desc_val, amt_val, inc_val, pm))
+                if c.rowcount > 0:
+                    new_rows += 1
+            except sqlite3.IntegrityError:
+                # Ignore duplicate transactions
+                pass
+                
+    conn.commit()
+    
+    # Sync to CSV Backup
+    df_export = pd.read_sql_query("SELECT date, desc, amount, income, payment_method FROM transactions", conn)
+    df_export.to_csv(CSV_BACKUP_PATH, index=False, encoding='utf-8-sig')
+    conn.close()
+    
+    return new_rows
+
+# =====================================================================
+# Dashboard Application Flow
+# =====================================================================
+try:
+    # --- Import New Data Section ---
+    conn_check = sqlite3.connect(DB_PATH)
+    has_data = pd.read_sql_query("SELECT COUNT(*) as count FROM transactions", conn_check).iloc[0]['count'] > 0
+    conn_check.close()
+    
+    with st.expander(T.get("import_title", "📥 Import New Data"), expanded=not has_data):
+        uploaded_files = st.file_uploader(T["upload_label"], type=["csv"], accept_multiple_files=True)
+        if uploaded_files:
+            file_configs = {}
+            for f in uploaded_files:
+                file_configs[f.name] = st.text_input(
+                    T.get("pm_label", "Payment Method / Account for '{filename}'").format(filename=f.name), 
+                    value="Credit Card", 
+                    key=f"pm_{f.name}"
+                )
+            if st.button(T.get("save_db_btn", "💾 Process & Save to Database"), type="primary"):
+                new_records = process_and_save_files(uploaded_files, file_configs)
+                st.success(T.get("import_success", "Successfully added {count} new records!").replace("{count}", str(new_records)))
+                st.rerun()
+                
+    # --- Load Master Data from SQLite ---
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query("SELECT date, desc, amount, income, payment_method FROM transactions", conn)
+    conn.close()
+    
+    if df.empty:
+        st.info(T.get("db_empty_msg", "No data available. Please upload CSV files above to start building your master database."))
+        st.stop()
         
-        # Apply categorization and unify merchant names based on rules
-        canon_info = df['desc'].apply(lambda x: assign_category_and_name(x, rules.get("mapping_rules", {}), rules.get("aliases", {})))
-        df['desc'] = [x[0] for x in canon_info]
-        df['category'] = [x[1] for x in canon_info]
+    # --- Compute Derived Columns (Categories update dynamically based on rules) ---
+    df['date'] = pd.to_datetime(df['date'])
+    df['year'] = df['date'].dt.year.astype(str)
+    df['month'] = df['date'].dt.month.astype(str).str.zfill(2)
+    df['year_month'] = df['date'].dt.strftime('%Y-%m')
+    
+    df['raw_desc'] = df['desc'] # 名寄せ前の生の店舗名を保持
+    
+    canon_info = df['raw_desc'].apply(lambda x: assign_category_and_name(x, rules.get("mapping_rules", {}), rules.get("aliases", {})))
+    df['desc'] = [x[0] for x in canon_info]
+    df['category'] = [x[1] for x in canon_info]
+    df.loc[df['income'] > 0, 'category'] = T.get("cat_income", "Income / Deposit")
+    
+    raw_processed_df = df.copy()
+    
+    st.divider()
+    
+    csv_data_export = raw_processed_df.to_csv(index=False).encode('utf-8-sig')
+    st.download_button(
+        label=T.get("download_csv_btn", "📥 Download Cleaned Data (CSV)"),
+        data=csv_data_export,
+        file_name="cleaned_spending_data.csv",
+        mime="text/csv",
+        use_container_width=True,
+        type="primary"
+    )
+
+    tab_dash, tab_set = st.tabs([T.get("tab_dashboard", "Dashboard"), T.get("tab_settings", "Settings & Adjustments")])
+    
+    with tab_dash:
+        # Time & Payment Method Filters
+        col_y, col_m, col_pm = st.columns(3)
         
-        # Override category for Income/Deposit transactions
-        df.loc[df['income'] > 0, 'category'] = T.get("cat_income", "Income / Deposit")
+        years = [T["all_years"]] + sorted(df['year'].unique().tolist())
+        selected_year = col_y.selectbox(T["filter_year"], years)
+        if selected_year != T["all_years"]:
+            df = df[df['year'] == selected_year]
+            
+        months = [T["all_months"]] + sorted(df['month'].unique().tolist())
+        selected_month = col_m.selectbox(T["filter_month"], months)
+        if selected_month != T["all_months"]:
+            df = df[df['month'] == selected_month]
+            
+        pms = [T.get("all_pms", "All Payment Methods")] + sorted(df['payment_method'].dropna().unique().tolist())
+        selected_pm = col_pm.selectbox(T.get("pm_filter_label", "Filter by Payment Method"), pms)
+        if selected_pm != T.get("all_pms", "All Payment Methods"):
+            df = df[df['payment_method'] == selected_pm]
+            
+        if df.empty:
+            st.warning("No data available for the selected period/filter." if lang == "en" else "選択された条件のデータがありません。")
+            st.stop()
+            
+        # Metrics
+        total_spent = df['amount'].sum()
+        total_income = df['income'].sum()
+        net_cashflow = total_income - total_spent
         
-        raw_processed_df = df.copy()
+        # Calculate Month-over-Month (MoM) delta if a specific month is selected
+        delta_spent = None
+        if selected_month != T["all_months"] and selected_year != T["all_years"]:
+            try:
+                curr_period = pd.Period(f"{selected_year}-{selected_month}", freq='M')
+                prev_period = curr_period - 1
+                prev_ym = prev_period.strftime('%Y-%m')
+                prev_df = raw_processed_df[raw_processed_df['year_month'] == prev_ym]
+                prev_spent = prev_df['amount'].sum()
+                delta_spent = total_spent - prev_spent
+            except Exception:
+                pass
+                
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric(T["metrics_total"], f"${total_spent:,.2f}", delta=f"{delta_spent:,.2f}" if delta_spent is not None else None, delta_color="inverse")
+        col2.metric(T.get("metrics_income", "Total Income"), f"${total_income:,.2f}")
+        col3.metric(T.get("metrics_cashflow", "Net Cash Flow"), f"${net_cashflow:,.2f}")
+        col4.metric(T["metrics_transactions"], len(df[df['amount'] > 0]))
+        
+        # Budget vs Actuals Tracking
+        if selected_month != T["all_months"] and st.session_state.monthly_budget > 0:
+            budget_pct = min(total_spent / st.session_state.monthly_budget, 1.0)
+            st.progress(budget_pct, text=f"{T.get('budget_usage', 'Budget Usage')}: ${total_spent:,.2f} / ${st.session_state.monthly_budget:,.2f} ({budget_pct*100:.1f}%)")
         
         st.divider()
         
-        csv_data_export = raw_processed_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(
-            label=T.get("download_csv_btn", "📥 Download Cleaned Data (CSV)"),
-            data=csv_data_export,
-            file_name="cleaned_spending_data.csv",
-            mime="text/csv",
-            use_container_width=True,
-            type="primary"
-        )
-
-        tab_dash, tab_set = st.tabs([T.get("tab_dashboard", "Dashboard"), T.get("tab_settings", "Settings & Adjustments")])
+        # Macro Trend Chart (Toggleable Year/Month)
+        st.subheader(T.get("trend_title", "Spending Trend"))
+        col_agg, col_tcat = st.columns(2)
+        with col_agg:
+            agg_choice = st.radio(
+                T.get("trend_agg_label", "Time Aggregation"), 
+                [T.get("agg_monthly", "Monthly"), T.get("agg_yearly", "Yearly")], 
+                horizontal=True
+            )
+        with col_tcat:
+            all_cats_list = sorted(df['category'].unique().tolist())
+            selected_trend_cats = st.multiselect(
+                T.get("trend_filter_cat", "Filter Categories"),
+                options=all_cats_list,
+                default=all_cats_list
+            )
         
-        with tab_dash:
-            # Time Filters (Year and Month)
-            col_y, col_m = st.columns(2)
+        time_col = 'year_month' if agg_choice == T.get("agg_monthly", "Monthly") else 'year'
+        trend_df = df[df['category'].isin(selected_trend_cats)]
+        trend_df = trend_df.groupby([time_col, 'category'], as_index=False)['amount'].sum()
+        
+        fig_trend = px.bar(trend_df, x=time_col, y='amount', color='category', title=f"{agg_choice} Trend")
+        fig_trend.update_layout(xaxis_type='category') # 期間の間延びを防ぐ
+        st.plotly_chart(fig_trend, use_container_width=True)
+        
+        st.divider()
+        
+        # Micro Breakdown (Pie Chart & Table)
+        c1, c2 = st.columns(2)
+        with c1:
+            fig_pie = px.pie(df, values='amount', names='category', title=T["pie_title"], hole=0.4)
+            st.plotly_chart(fig_pie, use_container_width=True)
             
-            years = [T["all_years"]] + sorted(df['year'].unique().tolist())
-            selected_year = col_y.selectbox(T["filter_year"], years)
-            if selected_year != T["all_years"]:
-                df = df[df['year'] == selected_year]
-                
-            months = [T["all_months"]] + sorted(df['month'].unique().tolist())
-            selected_month = col_m.selectbox(T["filter_month"], months)
-            if selected_month != T["all_months"]:
-                df = df[df['month'] == selected_month]
-                
-            if df.empty:
-                st.warning("No data available for the selected period." if lang == "en" else "選択された期間のデータがありません。")
-                st.stop()
-                
-            # Metrics
-            total_spent = df['amount'].sum()
-            total_income = df['income'].sum()
-            net_cashflow = total_income - total_spent
+        with c2:
+            st.subheader(T["cat_breakdown"])
+            cat_summary = df.groupby('category').agg(
+                Total_Amount=('amount', 'sum'),
+                Transactions=('amount', 'count')
+            ).reset_index()
+            cat_summary = cat_summary.sort_values(by='Total_Amount', ascending=False)
             
-            # Calculate Month-over-Month (MoM) delta if a specific month is selected
-            delta_spent = None
-            if selected_month != T["all_months"] and selected_year != T["all_years"]:
-                try:
-                    curr_period = pd.Period(f"{selected_year}-{selected_month}", freq='M')
-                    prev_period = curr_period - 1
-                    prev_ym = prev_period.strftime('%Y-%m')
-                    prev_df = raw_processed_df[raw_processed_df['year_month'] == prev_ym]
-                    prev_spent = prev_df['amount'].sum()
-                    delta_spent = total_spent - prev_spent
-                except Exception:
-                    pass
-                    
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric(T["metrics_total"], f"${total_spent:,.2f}", delta=f"{delta_spent:,.2f}" if delta_spent is not None else None, delta_color="inverse")
-            col2.metric(T.get("metrics_income", "Total Income"), f"${total_income:,.2f}")
-            col3.metric(T.get("metrics_cashflow", "Net Cash Flow"), f"${net_cashflow:,.2f}")
-            col4.metric(T["metrics_transactions"], len(df[df['amount'] > 0]))
+            display_cat = cat_summary.copy()
+            display_cat['Total_Amount'] = display_cat['Total_Amount'].apply(lambda x: f"${x:,.2f}")
+            st.dataframe(display_cat, use_container_width=True, hide_index=True)
+        
+        st.divider()
+        
+        # Merchant Trend Chart
+        st.subheader(T.get("merchant_trend_title", "Merchant Spending Trend"))
+        merchant_counts = df.groupby('desc').size()
+        recurring_merchants = merchant_counts[merchant_counts >= 2].index.tolist()
+        
+        if recurring_merchants:
+            top_merchants = df[df['desc'].isin(recurring_merchants)].groupby('desc')['amount'].sum().nlargest(5).index.tolist()
             
-            # Budget vs Actuals Tracking
-            if selected_month != T["all_months"] and st.session_state.monthly_budget > 0:
-                budget_pct = min(total_spent / st.session_state.monthly_budget, 1.0)
-                st.progress(budget_pct, text=f"{T.get('budget_usage', 'Budget Usage')}: ${total_spent:,.2f} / ${st.session_state.monthly_budget:,.2f} ({budget_pct*100:.1f}%)")
-            
-            st.divider()
-            
-            # Macro Trend Chart (Toggleable Year/Month)
-            st.subheader(T.get("trend_title", "Spending Trend"))
-            col_agg, col_tcat = st.columns(2)
-            with col_agg:
-                agg_choice = st.radio(
-                    T.get("trend_agg_label", "Time Aggregation"), 
-                    [T.get("agg_monthly", "Monthly"), T.get("agg_yearly", "Yearly")], 
-                    horizontal=True
-                )
-            with col_tcat:
-                all_cats_list = sorted(df['category'].unique().tolist())
-                selected_trend_cats = st.multiselect(
-                    T.get("trend_filter_cat", "Filter Categories"),
-                    options=all_cats_list,
-                    default=all_cats_list
-                )
-            
-            time_col = 'year_month' if agg_choice == T.get("agg_monthly", "Monthly") else 'year'
-            trend_df = df[df['category'].isin(selected_trend_cats)]
-            trend_df = trend_df.groupby([time_col, 'category'], as_index=False)['amount'].sum()
-            
-            fig_trend = px.bar(trend_df, x=time_col, y='amount', color='category', title=f"{agg_choice} Trend")
-            fig_trend.update_layout(xaxis_type='category') # 期間の間延びを防ぐ
-            st.plotly_chart(fig_trend, use_container_width=True)
-            
-            st.divider()
-            
-            # Micro Breakdown (Pie Chart & Table)
-            c1, c2 = st.columns(2)
-            with c1:
-                fig_pie = px.pie(df, values='amount', names='category', title=T["pie_title"], hole=0.4)
-                st.plotly_chart(fig_pie, use_container_width=True)
-                
-            with c2:
-                st.subheader(T["cat_breakdown"])
-                cat_summary = df.groupby('category').agg(
-                    Total_Amount=('amount', 'sum'),
-                    Transactions=('amount', 'count')
-                ).reset_index()
-                cat_summary = cat_summary.sort_values(by='Total_Amount', ascending=False)
-                
-                display_cat = cat_summary.copy()
-                display_cat['Total_Amount'] = display_cat['Total_Amount'].apply(lambda x: f"${x:,.2f}")
-                st.dataframe(display_cat, use_container_width=True, hide_index=True)
-            
-            st.divider()
-            
-            # Merchant Trend Chart
-            st.subheader(T.get("merchant_trend_title", "Merchant Spending Trend"))
-            merchant_counts = df.groupby('desc').size()
-            recurring_merchants = merchant_counts[merchant_counts >= 2].index.tolist()
-            
-            if recurring_merchants:
-                top_merchants = df[df['desc'].isin(recurring_merchants)].groupby('desc')['amount'].sum().nlargest(5).index.tolist()
-                
-                selected_merchants = st.multiselect(
-                    T.get("merchant_filter_label", "Select Merchants (Recurring Only)"),
-                    options=sorted(recurring_merchants),
-                    default=top_merchants
-                )
-                
-                if selected_merchants:
-                    merch_df = df[df['desc'].isin(selected_merchants)]
-                    merch_trend_df = merch_df.groupby([time_col, 'desc'], as_index=False)['amount'].sum()
-                    
-                    fig_merch_trend = px.bar(merch_trend_df, x=time_col, y='amount', color='desc', title=f"{agg_choice} Trend by Merchant")
-                    fig_merch_trend.update_layout(xaxis_type='category')
-                    st.plotly_chart(fig_merch_trend, use_container_width=True)
-                else:
-                    st.info("Please select at least one merchant." if lang == "en" else "店舗を1つ以上選択してください。")
-            else:
-                st.info("No recurring merchants found in this period." if lang == "en" else "この期間に複数回利用した店舗はありません。")
-
-            with st.expander(T["raw_data"]):
-                cats = [T["all_cats"]] + list(df['category'].unique())
-                selected_cat = st.selectbox(T["filter_label"], cats)
-                
-                if selected_cat != T["all_cats"]:
-                    filtered_df = df[df['category'] == selected_cat]
-                else:
-                    filtered_df = df
-                    
-                st.dataframe(filtered_df, use_container_width=True, hide_index=True)
-
-
-        with tab_set:
-            st.header(T.get("tab_settings", "⚙️ Settings & Adjustments"))
-            
-            # 1. Unclassified Items (other)
-            st.subheader(T.get("unclass_title", "❓ Resolve Unclassified (other)"))
-            st.markdown(T.get("unclass_desc", "Assign categories to these top unclassified merchants to train the system."))
-            other_df = raw_processed_df[raw_processed_df['category'] == 'other']
-            categories_list = rules.get("categories", [])
-            
-            if not other_df.empty:
-                other_summary = other_df.groupby('desc').agg(Total=('amount', 'sum'), Count=('amount', 'count')).reset_index().sort_values('Total', ascending=False)
-                for _, row in other_summary.head(10).iterrows():
-                    merchant = row['desc']
-                    c1, c2, c3 = st.columns([4, 3, 2])
-                    c1.write(f"**{merchant}**  \n${row['Total']:.2f} ({row['Count']} tx)")
-                    new_cat = c2.selectbox("Category", options=categories_list, key=f"unclass_cat_{merchant}", label_visibility="collapsed")
-                    if c3.button(T.get("manual_override_btn", "Add Rule"), key=f"unclass_btn_{merchant}"):
-                        rules.setdefault("mapping_rules", {})[merchant.lower()] = new_cat
-                        save_spending_rules(CONFIG_PATH, rules)
-                        st.rerun()
-            else:
-                st.success(T.get("unclass_all_done", "✅ All items are successfully classified!"))
-                
-            st.divider()
-            
-            # 2. Existing Rules by Tab
-            st.subheader(T.get("rules_mgmt_title", "📚 Rule Management"))
-            st.markdown(T.get("rules_mgmt_desc", "Edit, add, or delete rules. Grouped by category and sorted alphabetically."))
-            
-            if categories_list:
-                rule_tabs = st.tabs(categories_list)
-                for i, cat in enumerate(categories_list):
-                    with rule_tabs[i]:
-                        cat_rules = {k: v for k, v in rules.get("mapping_rules", {}).items() if v == cat}
-                        sorted_keys = sorted(cat_rules.keys())
-                        df_rules = pd.DataFrame([{"Keyword": k, "Category": v} for k in sorted_keys for v in [cat_rules[k]]])
-                        
-                        if df_rules.empty:
-                            df_rules = pd.DataFrame(columns=["Keyword", "Category"])
-                            
-                        edited_df = st.data_editor(
-                            df_rules,
-                            column_config={
-                                "Keyword": st.column_config.TextColumn(T.get("rule_merchant", "Merchant / Keyword")),
-                                "Category": st.column_config.SelectboxColumn(T.get("rule_category", "Category"), options=categories_list)
-                            },
-                            hide_index=True,
-                            num_rows="dynamic",
-                            key=f"editor_{cat}",
-                            use_container_width=True
-                        )
-                        
-                        save_btn_label = T.get("save_rules_btn", "💾 Save '{cat}' Rules").replace("{cat}", cat)
-                        if st.button(save_btn_label, key=f"save_{cat}"):
-                            for k in sorted_keys:
-                                if k in rules["mapping_rules"]:
-                                    del rules["mapping_rules"][k]
-                            for _, row in edited_df.iterrows():
-                                kw = str(row["Keyword"]).strip().lower()
-                                if kw and kw != "nan":
-                                    rules["mapping_rules"][kw] = row["Category"]
-                                    
-                            save_spending_rules(CONFIG_PATH, rules)
-                            st.success(T.get("save_success", "Rules saved successfully!"))
-                            st.rerun()
-
-            st.divider()
-            
-            # 3. Budget Settings
-            st.subheader(T.get("budget_title", "Monthly Budget Target"))
-            st.session_state.monthly_budget = st.number_input(
-                T.get("budget_label", "Budget ($)"), 
-                min_value=0, 
-                value=st.session_state.monthly_budget, 
-                step=100
+            selected_merchants = st.multiselect(
+                T.get("merchant_filter_label", "Select Merchants (Recurring Only)"),
+                options=sorted(recurring_merchants),
+                default=top_merchants
             )
             
-            st.divider()
-            
-            # 4. Recurring Expenses / Subscriptions
-            st.subheader(T.get("subs_title", "Recurring Expenses (Subscriptions)"))
-            recurring_candidates = raw_processed_df[raw_processed_df['amount'] > 0].groupby('desc')['year_month'].nunique()
-            recurring_descs = recurring_candidates[recurring_candidates >= 2].index.tolist()
-            
-            subs_df = raw_processed_df[raw_processed_df['desc'].isin(recurring_descs) & ~raw_processed_df['desc'].isin(st.session_state.ignored_subs)]
-            
-            if not subs_df.empty:
-                subs_summary = subs_df.groupby('desc').agg(
-                    Average_Monthly=('amount', 'mean'),
-                    Category=('category', 'first')
-                ).reset_index().sort_values('Average_Monthly', ascending=False)
+            if selected_merchants:
+                merch_df = df[df['desc'].isin(selected_merchants)]
+                merch_trend_df = merch_df.groupby([time_col, 'desc'], as_index=False)['amount'].sum()
                 
-                display_subs = subs_summary.copy()
-                display_subs['Average_Monthly'] = display_subs['Average_Monthly'].apply(lambda x: f"${x:,.2f}")
-                
-                c_sub1, c_sub2 = st.columns([3, 1])
-                with c_sub1:
-                    st.dataframe(display_subs, use_container_width=True, hide_index=True)
-                with c_sub2:
-                    to_ignore = st.selectbox("Exclude?", options=subs_summary['desc'].tolist())
-                    if st.button(T.get("subs_ignore_btn", "Ignore Selected")):
-                        st.session_state.ignored_subs.append(to_ignore)
-                        st.rerun()
+                fig_merch_trend = px.bar(merch_trend_df, x=time_col, y='amount', color='desc', title=f"{agg_choice} Trend by Merchant")
+                fig_merch_trend.update_layout(xaxis_type='category')
+                st.plotly_chart(fig_merch_trend, use_container_width=True)
             else:
-                st.info("No recurring expenses found." if lang == "en" else "定期的な支払いは見つかりませんでした。")
+                st.info("Please select at least one merchant." if lang == "en" else "店舗を1つ以上選択してください。")
+        else:
+            st.info("No recurring merchants found in this period." if lang == "en" else "この期間に複数回利用した店舗はありません。")
+
+        with st.expander(T["raw_data"]):
+            cats = [T["all_cats"]] + list(df['category'].unique())
+            selected_cat = st.selectbox(T["filter_label"], cats)
+            
+            if selected_cat != T["all_cats"]:
+                filtered_df = df[df['category'] == selected_cat]
+            else:
+                filtered_df = df
+                
+            st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+
+
+    with tab_set:
+        st.header(T.get("tab_settings", "⚙️ Settings & Adjustments"))
         
-    except Exception as e:
-        st.error(f"Error reading file: {e}")
+        # 1. Unclassified Items (other)
+        st.subheader(T.get("unclass_title", "❓ Resolve Unclassified (other)"))
+        st.markdown(T.get("unclass_desc", "Assign categories to these top unclassified merchants to train the system."))
+        other_df = raw_processed_df[raw_processed_df['category'] == 'other']
+        categories_list = rules.get("categories", [])
+        
+        if not other_df.empty:
+            other_summary = other_df.groupby('desc').agg(Total=('amount', 'sum'), Count=('amount', 'count')).reset_index().sort_values(['Count', 'Total'], ascending=[False, False])
+
+            for _, row in other_summary.head(10).iterrows():
+                merchant = row['desc']
+                c1, c2, c3 = st.columns([4, 3, 2])
+                c1.write(f"**{merchant}**  \n${row['Total']:.2f} ({row['Count']} tx)")
+                new_cat = c2.selectbox("Category", options=categories_list, key=f"unclass_cat_{merchant}", label_visibility="collapsed")
+                if c3.button(T.get("manual_override_btn", "Add Rule"), key=f"unclass_btn_{merchant}"):
+                    rules.setdefault("mapping_rules", {})[merchant.lower()] = new_cat
+                    save_spending_rules(CONFIG_PATH, rules)
+                    st.rerun()
+        else:
+            st.success(T.get("unclass_all_done", "✅ All items are successfully classified!"))
+            
+        st.divider()
+        
+        # 1.5 Merge Similar Merchants (Aliases)
+        st.subheader(T.get("merge_title", "🔗 Merge Similar Merchants (Aliases)"))
+        st.markdown(T.get("merge_desc", "Select variations of a merchant name and merge them into one."))
+        
+        unique_raw_descs = sorted(raw_processed_df['raw_desc'].dropna().unique().tolist())
+        
+        c_m1, c_m2, c_m3 = st.columns([4, 3, 2])
+        merge_sources = c_m1.multiselect(T.get("merge_select", "Select variations"), options=unique_raw_descs)
+        merge_target = c_m2.text_input(T.get("merge_target", "Target Canonical Name"), value=merge_sources[0] if merge_sources else "")
+        if c_m3.button(T.get("merge_btn", "Merge & Save"), use_container_width=True):
+            if merge_sources and merge_target:
+                if "aliases" not in rules:
+                    rules["aliases"] = {}
+                for src in merge_sources:
+                    if src.lower() != merge_target.lower():
+                        rules["aliases"][src.lower()] = merge_target.lower()
+                save_spending_rules(CONFIG_PATH, rules)
+                st.success(T.get("merge_success", "Merged {count} items into '{target}'!").format(count=len(merge_sources), target=merge_target))
+                st.rerun()
+
+        st.divider()
+        
+        # 2. Existing Rules by Tab
+        st.subheader(T.get("rules_mgmt_title", "📚 Rule Management"))
+        st.markdown(T.get("rules_mgmt_desc", "Edit, add, or delete rules. Grouped by category and sorted alphabetically."))
+        
+        if categories_list:
+            rule_tabs = st.tabs(categories_list)
+            for i, cat in enumerate(categories_list):
+                with rule_tabs[i]:
+                    cat_rules = {k: v for k, v in rules.get("mapping_rules", {}).items() if v == cat}
+                    sorted_keys = sorted(cat_rules.keys())
+                    df_rules = pd.DataFrame([{"Keyword": k, "Category": v} for k in sorted_keys for v in [cat_rules[k]]])
+                    
+                    if df_rules.empty:
+                        df_rules = pd.DataFrame(columns=["Keyword", "Category"])
+                        
+                    edited_df = st.data_editor(
+                        df_rules,
+                        column_config={
+                            "Keyword": st.column_config.TextColumn(T.get("rule_merchant", "Merchant / Keyword")),
+                            "Category": st.column_config.SelectboxColumn(T.get("rule_category", "Category"), options=categories_list)
+                        },
+                        hide_index=True,
+                        num_rows="dynamic",
+                        key=f"editor_{cat}",
+                        use_container_width=True
+                    )
+                    
+                    save_btn_label = T.get("save_rules_btn", "💾 Save '{cat}' Rules").replace("{cat}", cat)
+                    if st.button(save_btn_label, key=f"save_{cat}"):
+                        for k in sorted_keys:
+                            if k in rules["mapping_rules"]:
+                                del rules["mapping_rules"][k]
+                        for _, row in edited_df.iterrows():
+                            kw = str(row["Keyword"]).strip().lower()
+                            if kw and kw != "nan":
+                                rules["mapping_rules"][kw] = row["Category"]
+                                
+                        save_spending_rules(CONFIG_PATH, rules)
+                        st.success(T.get("save_success", "Rules saved successfully!"))
+                        st.rerun()
+
+        st.divider()
+        
+        # 3. Budget Settings
+        st.subheader(T.get("budget_title", "Monthly Budget Target"))
+        st.session_state.monthly_budget = st.number_input(
+            T.get("budget_label", "Budget ($)"), 
+            min_value=0, 
+            value=st.session_state.monthly_budget, 
+            step=100
+        )
+        
+        st.divider()
+        
+        # 4. Recurring Expenses / Subscriptions
+        st.subheader(T.get("subs_title", "Recurring Expenses (Subscriptions)"))
+        recurring_candidates = raw_processed_df[raw_processed_df['amount'] > 0].groupby('desc')['year_month'].nunique()
+        recurring_descs = recurring_candidates[recurring_candidates >= 2].index.tolist()
+        
+        subs_df = raw_processed_df[raw_processed_df['desc'].isin(recurring_descs) & ~raw_processed_df['desc'].isin(st.session_state.ignored_subs)]
+        
+        if not subs_df.empty:
+            subs_summary = subs_df.groupby('desc').agg(
+                Average_Monthly=('amount', 'mean'),
+                Category=('category', 'first')
+            ).reset_index().sort_values('Average_Monthly', ascending=False)
+            
+            display_subs = subs_summary.copy()
+            display_subs['Average_Monthly'] = display_subs['Average_Monthly'].apply(lambda x: f"${x:,.2f}")
+            
+            c_sub1, c_sub2 = st.columns([3, 1])
+            with c_sub1:
+                st.dataframe(display_subs, use_container_width=True, hide_index=True)
+            with c_sub2:
+                to_ignore = st.selectbox("Exclude?", options=subs_summary['desc'].tolist())
+                if st.button(T.get("subs_ignore_btn", "Ignore Selected")):
+                    st.session_state.ignored_subs.append(to_ignore)
+                    st.rerun()
+        else:
+            st.info("No recurring expenses found." if lang == "en" else "定期的な支払いは見つかりませんでした。")
+            
+        st.divider()
+        
+        # 5. Database Reset
+        st.subheader(T.get("db_reset_title", "🗑️ Reset Database"))
+        st.markdown(T.get("db_reset_desc", "Delete all imported data from the database and local CSV backup. This action cannot be undone."))
+        if st.button(T.get("db_reset_btn", "⚠️ Delete All Data"), type="primary"):
+            conn_reset = sqlite3.connect(DB_PATH)
+            conn_reset.execute("DROP TABLE IF EXISTS transactions")
+            conn_reset.commit()
+            conn_reset.close()
+            
+            if os.path.exists(CSV_BACKUP_PATH):
+                os.remove(CSV_BACKUP_PATH)
+                
+            init_db() # Recreate empty table
+            st.success("Database has been reset!" if lang == "en" else "データベースを初期化しました！")
+            st.rerun()
+            
+except Exception as e:
+    st.error(f"Application Error: {e}")
